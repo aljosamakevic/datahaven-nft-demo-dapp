@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+@theme {
+  /* DataHaven warm neutral backgrounds */
+  --color-dh-950: #1a1714;
+  --color-dh-900: #231f1b;
+  --color-dh-800: #2e2924;
+  --color-dh-700: #3d3630;
+  --color-dh-600: #4d443c;
+  --color-dh-500: #6b5f54;
+  --color-dh-400: #8a7d72;
+  --color-dh-300: #b0a498;
+  --color-dh-200: #d4cbc2;
+  --color-dh-100: #ede8e3;
+
+  /* DataHaven sage/olive accent */
+  --color-sage-600: #5a7a5a;
+  --color-sage-500: #6b8f6b;
+  --color-sage-400: #8ab48a;
+  --color-sage-300: #a8cca8;
+}
+
+:root {
+  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color-scheme: dark;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* Force single-column grids inside the split-view content pane (only when code panel is visible) */
+@media (min-width: 640px) {
+  .split-content .grid {
+    grid-template-columns: 1fr !important;
+  }
+  .split-content .lg\:col-span-1,
+  .split-content .lg\:col-span-2 {
+    grid-column: span 1 !important;
+  }
+  .split-content .md\:grid-cols-2,
+  .split-content .md\:grid-cols-3 {
+    grid-template-columns: 1fr !important;
+  }
+}

@@ -1,5 +1,5 @@
-// NFT Contract address — update after deploying DataHavenNFT.sol
-export const NFT_CONTRACT_ADDRESS = '0x0000000000000000000000000000000000000000' as const;
+// NFT Contract address
+export const NFT_CONTRACT_ADDRESS = '0x81c56bB494417C1840d34510FE1fbE251ee83B51' as const;
 
 // ABI for DataHavenNFT — only the functions used by the frontend
 export const NFT_CONTRACT_ABI = [

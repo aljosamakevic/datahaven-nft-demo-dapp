@@ -9,3 +9,5 @@ export const NETWORKS = {
     nativeCurrency: { name: 'Mock', symbol: 'MOCK', decimals: 18 },
   },
 };
+
+export const NETWORK = NETWORKS.testnet;

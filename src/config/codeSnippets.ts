@@ -32,7 +32,7 @@ export async function connectWallet(): Promise<\`0x\${string}\`> {
 
   // Initialize the StorageHub SDK for on-chain storage operations
   storageHubClientInstance = new StorageHubClient({
-    rpcUrl: NETWORKS.testnet.rpcUrl,
+    rpcUrl: NETWORK.rpcUrl,
     chain,
     walletClient: walletClientInstance,
     filesystemContractAddress: '0x...0404',
@@ -61,7 +61,7 @@ export async function connectToMsp(): Promise<MspClient> {
   }
 
   const httpCfg: HttpClientConfig = {
-    baseUrl: NETWORKS.testnet.mspUrl,
+    baseUrl: NETWORK.mspUrl,
   };
 
   // Connect to MSP — sessionProvider attaches auth to each request
@@ -206,7 +206,7 @@ export async function uploadFileToDH(
 const metadata = {
   name: nftName,
   description: nftDescription,
-  image: imageFileKey, // DH file key for the image
+  image: getDownloadUrl(imageFileKey), // Public DH download URL
 };
 
 // Convert to bytes and upload
@@ -221,9 +221,8 @@ const metadataFileKey = await uploadFileToDH(
   metadataBytes.length
 );
 
-// Wait for MSP confirmation
-await waitForMSPConfirmOnChain(metadataFileKey);
-await waitForBackendFileReady(bucketId, metadataFileKey);`,
+// Wait for MSP on-chain confirmation
+await waitForMSPConfirmOnChain(metadataFileKey);`,
   },
   {
     id: 'mintNft',
@@ -286,16 +285,15 @@ export async function fetchAllNFTs(): Promise<MintedNFT[]> {
       getOwnerOf(i),
     ]);
 
-    // Fetch metadata JSON from DataHaven
+    // Fetch metadata JSON via public download URL
     let metadata = null;
     let imageUrl = null;
     try {
-      const blob = await downloadFile(tokenURI);
-      metadata = JSON.parse(await blob.text());
+      const res = await fetch(getDownloadUrl(tokenURI));
+      metadata = await res.json();
 
-      // Fetch image from DataHaven
-      const imgBlob = await downloadFile(metadata.image);
-      imageUrl = URL.createObjectURL(imgBlob);
+      // Image URL is already a public download URL
+      imageUrl = metadata.image;
     } catch {
       // File may be expired — show placeholder
     }

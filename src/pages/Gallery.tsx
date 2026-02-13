@@ -38,17 +38,6 @@ export function Gallery() {
     }
   }, [isAuthenticated, loadNFTs]);
 
-  // Clean up blob URLs on unmount
-  useEffect(() => {
-    return () => {
-      nfts.forEach((nft) => {
-        if (nft.imageUrl) {
-          URL.revokeObjectURL(nft.imageUrl);
-        }
-      });
-    };
-  }, [nfts]);
-
   const handleBurn = async (tokenId: number) => {
     if (!confirm(`Are you sure you want to burn NFT #${tokenId}? This cannot be undone.`)) {
       return;

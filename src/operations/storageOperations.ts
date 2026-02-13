@@ -11,7 +11,14 @@ import {
   buildGasTxOpts,
 } from '../services/clientService';
 import { getMspClient, getMspInfo, getValueProps, authenticateUser, isAuthenticated } from '../services/mspService';
+import { NETWORK } from '../config/networks';
 import type { PalletFileSystemStorageRequestMetadata } from '@polkadot/types/lookup';
+import type { FileStatus } from '../types';
+
+// Build a public download URL for a DataHaven file key
+export function getDownloadUrl(fileKey: string): string {
+  return NETWORK.mspUrl + 'download/' + fileKey;
+}
 
 // Bucket name prefix for NFT assets
 const NFT_BUCKET_PREFIX = 'nft-assets-';
@@ -270,19 +277,24 @@ export async function waitForBackendFileReady(bucketId: string, fileKey: string)
   throw new Error('Timed out waiting for file to be ready');
 }
 
-// Download a file from DataHaven
-export async function downloadFile(fileKey: string): Promise<Blob> {
+// Check the current status of a file (single poll, not a loop)
+export async function checkFileStatus(bucketId: string, fileKey: string): Promise<FileStatus> {
   const mspClient = getMspClient();
 
-  const downloadResponse = await mspClient.files.downloadFile(fileKey);
+  try {
+    const fileInfo = await mspClient.files.getFileInfo(bucketId, fileKey);
 
-  if (downloadResponse.status !== 200) {
-    throw new Error(`Download failed with status: ${downloadResponse.status}`);
+    if (fileInfo.status === 'ready') {
+      return 'ready';
+    } else if (fileInfo.status === 'revoked' || fileInfo.status === 'rejected' || fileInfo.status === 'expired') {
+      return 'error';
+    }
+    return 'processing';
+  } catch (error: unknown) {
+    const err = error as { status?: number; body?: { error?: string } };
+    if (err?.status === 404 || err?.body?.error === 'Not found: Record') {
+      return 'pending';
+    }
+    return 'error';
   }
-
-  const response = new Response(downloadResponse.stream);
-  const blob = await response.blob();
-
-  const contentType = downloadResponse.contentType || 'application/octet-stream';
-  return new Blob([blob], { type: contentType });
 }

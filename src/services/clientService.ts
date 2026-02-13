@@ -4,17 +4,17 @@ import { StorageHubClient } from '@storagehub-sdk/core';
 import type { EvmWriteOptions } from '@storagehub-sdk/core';
 import { ApiPromise, WsProvider } from '@polkadot/api';
 import { types } from '@storagehub/types-bundle';
-import { NETWORKS } from '../config/networks';
+import { NETWORK } from '../config/networks';
 
 // Storage key
 const CONNECTED_ADDRESS_KEY = 'datahaven_nft_connected_address';
 
 // Define the chain configuration
 export const chain: Chain = defineChain({
-  id: NETWORKS.testnet.id,
-  name: NETWORKS.testnet.name,
-  nativeCurrency: NETWORKS.testnet.nativeCurrency,
-  rpcUrls: { default: { http: [NETWORKS.testnet.rpcUrl] } },
+  id: NETWORK.id,
+  name: NETWORK.name,
+  nativeCurrency: NETWORK.nativeCurrency,
+  rpcUrls: { default: { http: [NETWORK.rpcUrl] } },
 });
 
 // State for connected clients
@@ -50,7 +50,7 @@ export function getPublicClient() {
   if (!publicClientInstance) {
     publicClientInstance = createPublicClient({
       chain,
-      transport: http(NETWORKS.testnet.rpcUrl),
+      transport: http(NETWORK.rpcUrl),
     });
   }
   return publicClientInstance;
@@ -58,7 +58,7 @@ export function getPublicClient() {
 
 // Switch wallet to the correct network
 async function switchToCorrectNetwork(provider: EIP1193Provider): Promise<void> {
-  const chainIdHex = NETWORKS.testnet.idHex;
+  const chainIdHex = NETWORK.idHex;
 
   try {
     // Try to switch to the network
@@ -76,9 +76,9 @@ async function switchToCorrectNetwork(provider: EIP1193Provider): Promise<void> 
         params: [
           {
             chainId: chainIdHex,
-            chainName: NETWORKS.testnet.name,
-            nativeCurrency: NETWORKS.testnet.nativeCurrency,
-            rpcUrls: [NETWORKS.testnet.rpcUrl],
+            chainName: NETWORK.name,
+            nativeCurrency: NETWORK.nativeCurrency,
+            rpcUrls: [NETWORK.rpcUrl],
           },
         ],
       });
@@ -115,7 +115,7 @@ export async function connectWallet(): Promise<`0x${string}`> {
 
   // Create StorageHub client
   storageHubClientInstance = new StorageHubClient({
-    rpcUrl: NETWORKS.testnet.rpcUrl,
+    rpcUrl: NETWORK.rpcUrl,
     chain: chain,
     walletClient: walletClientInstance,
     filesystemContractAddress: '0x0000000000000000000000000000000000000404' as `0x${string}`,
@@ -135,7 +135,7 @@ export async function initPolkadotApi(): Promise<ApiPromise> {
     return polkadotApiInstance;
   }
 
-  const provider = new WsProvider(NETWORKS.testnet.wsUrl);
+  const provider = new WsProvider(NETWORK.wsUrl);
   polkadotApiInstance = await ApiPromise.create({
     provider,
     typesBundle: types,
@@ -212,7 +212,7 @@ export async function restoreWalletConnection(): Promise<`0x${string}` | null> {
 
     // Re-create StorageHub client
     storageHubClientInstance = new StorageHubClient({
-      rpcUrl: NETWORKS.testnet.rpcUrl,
+      rpcUrl: NETWORK.rpcUrl,
       chain: chain,
       walletClient: walletClientInstance,
       filesystemContractAddress: '0x0000000000000000000000000000000000000404' as `0x${string}`,

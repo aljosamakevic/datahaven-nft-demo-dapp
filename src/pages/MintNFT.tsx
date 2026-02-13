@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
@@ -9,10 +9,11 @@ import {
   ensureNftBucket,
   uploadFileToDH,
   waitForMSPConfirmOnChain,
-  waitForBackendFileReady,
+  getDownloadUrl,
+  checkFileStatus,
 } from '../operations/storageOperations';
 import { mintNFT } from '../operations/nftOperations';
-import type { MintProgress } from '../types';
+import type { MintProgress, FileConfirmation } from '../types';
 
 export function MintNFT() {
   const { isAuthenticated, address, handleAuthError } = useAppState();
@@ -26,6 +27,11 @@ export function MintNFT() {
   const [progress, setProgress] = useState<MintProgress>({ step: 'idle', message: '' });
   const [mintResult, setMintResult] = useState<{ tokenId: number; txHash: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Post-mint file status tracking
+  const [fileConfirmations, setFileConfirmations] = useState<FileConfirmation[]>([]);
+  const [mintBucketId, setMintBucketId] = useState<string | null>(null);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -67,14 +73,16 @@ export function MintNFT() {
 
     setError(null);
     setMintResult(null);
+    setFileConfirmations([]);
 
     try {
       // Step 1: Ensure bucket
       setProgress({ step: 'ensuring-bucket', message: 'Creating storage bucket if needed...' });
       setActiveSnippet('ensureBucket');
       const bucketId = await ensureNftBucket(address);
+      setMintBucketId(bucketId);
 
-      // Step 2: Upload image
+      // Step 2: Upload image + wait for MSP on-chain confirm
       setProgress({ step: 'uploading-image', message: 'Uploading image to DataHaven...' });
       setActiveSnippet('uploadImage');
       const fileBuffer = await selectedFile.arrayBuffer();
@@ -85,19 +93,16 @@ export function MintNFT() {
         fileBytes,
         selectedFile.size
       );
-
-      // Step 3: Wait for image confirmation
-      setProgress({ step: 'confirming-image', message: 'Waiting for storage confirmation...' });
+      setProgress({ step: 'uploading-image', message: 'Waiting for MSP on-chain confirmation...' });
       await waitForMSPConfirmOnChain(imageFileKey);
-      await waitForBackendFileReady(bucketId, imageFileKey);
 
-      // Step 4: Upload metadata
+      // Step 3: Upload metadata + wait for MSP on-chain confirm
       setProgress({ step: 'uploading-metadata', message: 'Uploading NFT metadata to DataHaven...' });
       setActiveSnippet('uploadMetadata');
       const metadata = {
         name: nftName,
         description: nftDescription,
-        image: imageFileKey,
+        image: getDownloadUrl(imageFileKey),
       };
       const metadataJson = JSON.stringify(metadata, null, 2);
       const encoder = new TextEncoder();
@@ -108,19 +113,22 @@ export function MintNFT() {
         metadataBytes,
         metadataBytes.length
       );
-
-      // Step 5: Wait for metadata confirmation
-      setProgress({ step: 'confirming-metadata', message: 'Waiting for metadata confirmation...' });
+      setProgress({ step: 'uploading-metadata', message: 'Waiting for MSP on-chain confirmation...' });
       await waitForMSPConfirmOnChain(metadataFileKey);
-      await waitForBackendFileReady(bucketId, metadataFileKey);
 
-      // Step 6: Mint NFT on-chain
+      // Step 4: Mint NFT on-chain
       setProgress({ step: 'minting', message: 'Minting NFT on-chain...' });
       setActiveSnippet('mintNft');
       const result = await mintNFT(metadataFileKey);
 
       setMintResult(result);
       setProgress({ step: 'done', message: `NFT #${result.tokenId} minted successfully!` });
+
+      // Start background file status tracking
+      setFileConfirmations([
+        { label: 'Image', fileKey: imageFileKey, status: 'pending' },
+        { label: 'Metadata', fileKey: metadataFileKey, status: 'pending' },
+      ]);
     } catch (err) {
       if (handleAuthError(err)) return;
       const message = err instanceof Error ? err.message : 'Minting failed';
@@ -129,6 +137,45 @@ export function MintNFT() {
     }
   };
 
+  // Background polling for file confirmation status
+  const pollFileStatuses = useCallback(async () => {
+    if (!mintBucketId || fileConfirmations.length === 0) return;
+
+    const updated = await Promise.all(
+      fileConfirmations.map(async (fc) => {
+        if (fc.status === 'ready' || fc.status === 'error') return fc;
+        const status = await checkFileStatus(mintBucketId, fc.fileKey);
+        return { ...fc, status };
+      })
+    );
+
+    setFileConfirmations(updated);
+
+    // Stop polling when all files are ready or errored
+    if (updated.every((fc) => fc.status === 'ready' || fc.status === 'error')) {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    }
+  }, [mintBucketId, fileConfirmations]);
+
+  // Start polling when file confirmations are set
+  useEffect(() => {
+    if (progress.step === 'done' && fileConfirmations.length > 0 && !pollingRef.current) {
+      // Immediate first check
+      pollFileStatuses();
+      pollingRef.current = setInterval(pollFileStatuses, 5000);
+    }
+
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    };
+  }, [progress.step, fileConfirmations.length, pollFileStatuses]);
+
   const resetForm = () => {
     setNftName('');
     setNftDescription('');
@@ -136,25 +183,27 @@ export function MintNFT() {
     setProgress({ step: 'idle', message: '' });
     setMintResult(null);
     setError(null);
+    setFileConfirmations([]);
+    setMintBucketId(null);
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
   };
 
   const getSteps = () => {
     const steps: { label: string; status: 'pending' | 'active' | 'completed' | 'error' }[] = [
       { label: 'Ensure storage bucket', status: 'pending' },
       { label: 'Upload image to DataHaven', status: 'pending' },
-      { label: 'Confirm image storage', status: 'pending' },
       { label: 'Upload metadata to DataHaven', status: 'pending' },
-      { label: 'Confirm metadata storage', status: 'pending' },
       { label: 'Mint NFT on-chain', status: 'pending' },
     ];
 
     const stepMap: Record<string, number> = {
       'ensuring-bucket': 0,
       'uploading-image': 1,
-      'confirming-image': 2,
-      'uploading-metadata': 3,
-      'confirming-metadata': 4,
-      'minting': 5,
+      'uploading-metadata': 2,
+      'minting': 3,
     };
 
     if (progress.step === 'idle') return steps;
@@ -162,11 +211,14 @@ export function MintNFT() {
       return steps.map((s) => ({ ...s, status: 'completed' as const }));
     }
     if (progress.step === 'error') {
-      const activeIndex = Object.values(stepMap).find(
-        (_, idx) => steps[idx]?.status === 'active'
-      );
-      if (activeIndex !== undefined) {
-        steps[activeIndex].status = 'error';
+      const currentIndex = stepMap[Object.keys(stepMap).reverse().find(
+        (key) => stepMap[key] !== undefined
+      ) || ''];
+      if (currentIndex !== undefined) {
+        for (let i = 0; i < currentIndex; i++) {
+          steps[i].status = 'completed';
+        }
+        steps[currentIndex].status = 'error';
       }
       return steps;
     }
@@ -180,6 +232,21 @@ export function MintNFT() {
     }
 
     return steps;
+  };
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'pending':
+        return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-500/20 text-yellow-400">Pending</span>;
+      case 'processing':
+        return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-500/20 text-blue-400">Processing</span>;
+      case 'ready':
+        return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-500/20 text-green-400">Ready</span>;
+      case 'error':
+        return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/20 text-red-400">Error</span>;
+      default:
+        return null;
+    }
   };
 
   const isMinting = progress.step !== 'idle' && progress.step !== 'done' && progress.step !== 'error';
@@ -349,17 +416,15 @@ export function MintNFT() {
             <div className="space-y-4">
               <ProgressStepper steps={getSteps()} />
 
-              {(
-                <div className="mt-4 p-3 bg-dh-900 rounded-lg">
-                  <p className={`text-sm ${
-                    progress.step === 'done' ? 'text-green-400' :
-                    progress.step === 'error' ? 'text-red-400' :
-                    'text-sage-400'
-                  }`}>
-                    {progress.message}
-                  </p>
-                </div>
-              )}
+              <div className="mt-4 p-3 bg-dh-900 rounded-lg">
+                <p className={`text-sm ${
+                  progress.step === 'done' ? 'text-green-400' :
+                  progress.step === 'error' ? 'text-red-400' :
+                  'text-sage-400'
+                }`}>
+                  {progress.message}
+                </p>
+              </div>
 
               {mintResult && (
                 <div className="mt-4 p-4 bg-green-500/10 border border-green-500/30 rounded-lg space-y-2">
@@ -378,6 +443,32 @@ export function MintNFT() {
                   >
                     View in Gallery
                   </a>
+                </div>
+              )}
+
+              {/* File Confirmation Status */}
+              {fileConfirmations.length > 0 && (
+                <div className="mt-4 p-4 bg-dh-900 border border-dh-700 rounded-lg space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium text-dh-200">File Confirmation Status</p>
+                    {fileConfirmations.every((fc) => fc.status === 'ready') && (
+                      <span className="text-xs text-green-400">All files ready</span>
+                    )}
+                  </div>
+                  {fileConfirmations.map((fc) => (
+                    <div key={fc.fileKey} className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-xs text-dh-300">{fc.label}</span>
+                        <span className="text-xs font-mono text-dh-500 truncate max-w-[120px]">{fc.fileKey}</span>
+                      </div>
+                      {getStatusBadge(fc.status)}
+                    </div>
+                  ))}
+                  {!fileConfirmations.every((fc) => fc.status === 'ready' || fc.status === 'error') && (
+                    <p className="text-xs text-dh-500">
+                      Files may take up to 11 minutes to become downloadable while the network confirms them.
+                    </p>
+                  )}
                 </div>
               )}
             </div>

@@ -25,7 +25,7 @@ export interface BucketInfo {
 export interface NFTMetadata {
   name: string;
   description: string;
-  image: string; // DataHaven file key for the image
+  image: string; // Public download URL for the image
 }
 
 export interface MintedNFT {
@@ -33,10 +33,19 @@ export interface MintedNFT {
   owner: string;
   tokenURI: string; // DataHaven file key for the metadata JSON
   metadata: NFTMetadata | null; // null if metadata fetch failed (e.g., file expired)
-  imageUrl: string | null; // blob URL for display, null if image fetch failed
+  imageUrl: string | null; // Public download URL, null if unavailable
 }
 
 export interface MintProgress {
-  step: 'idle' | 'ensuring-bucket' | 'uploading-image' | 'confirming-image' | 'uploading-metadata' | 'confirming-metadata' | 'minting' | 'done' | 'error';
+  step: 'idle' | 'ensuring-bucket' | 'uploading-image' | 'uploading-metadata' | 'minting' | 'done' | 'error';
   message: string;
+}
+
+export type FileStatus = 'pending' | 'processing' | 'ready' | 'error';
+
+export interface FileConfirmation {
+  label: string;
+  fileKey: string;
+  status: FileStatus;
+  error?: string;
 }

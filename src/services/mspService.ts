@@ -2,7 +2,7 @@ import { MspClient } from '@storagehub-sdk/msp-client';
 import type { HealthStatus, InfoResponse, UserInfo, ValueProp } from '@storagehub-sdk/msp-client';
 import type { HttpClientConfig } from '@storagehub-sdk/core';
 import { getConnectedAddress, getWalletClient } from './clientService';
-import { NETWORKS } from '../config/networks';
+import { NETWORK } from '../config/networks';
 
 // Storage keys
 const SESSION_TOKEN_KEY = 'datahaven_nft_session_token';
@@ -47,7 +47,7 @@ export async function connectToMsp(): Promise<MspClient> {
     return mspClientInstance;
   }
 
-  const httpCfg: HttpClientConfig = { baseUrl: NETWORKS.testnet.mspUrl };
+  const httpCfg: HttpClientConfig = { baseUrl: NETWORK.mspUrl };
   mspClientInstance = await MspClient.connect(httpCfg, sessionProvider);
   return mspClientInstance;
 }

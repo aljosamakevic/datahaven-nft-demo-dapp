@@ -7,7 +7,7 @@ import {
 } from '../services/clientService';
 import { chain } from '../services/clientService';
 import { NFT_CONTRACT_ADDRESS, NFT_CONTRACT_ABI } from '../config/nftContract';
-import { downloadFile } from './storageOperations';
+import { getDownloadUrl } from './storageOperations';
 import type { NFTMetadata, MintedNFT } from '../types';
 
 // Mint an NFT with the given metadata URI (DataHaven file key)
@@ -172,11 +172,13 @@ export async function getOwnerOf(tokenId: number): Promise<string> {
   return result as string;
 }
 
-// Fetch NFT metadata from DataHaven
+// Fetch NFT metadata from DataHaven via public download URL
 export async function fetchNFTMetadata(metadataFileKey: string): Promise<NFTMetadata> {
-  const blob = await downloadFile(metadataFileKey);
-  const text = await blob.text();
-  const metadata: NFTMetadata = JSON.parse(text);
+  const response = await fetch(getDownloadUrl(metadataFileKey));
+  if (!response.ok) {
+    throw new Error(`Metadata fetch failed with status: ${response.status}`);
+  }
+  const metadata: NFTMetadata = await response.json();
   return metadata;
 }
 
@@ -194,8 +196,7 @@ export async function fetchNFT(tokenId: number): Promise<MintedNFT> {
     metadata = await fetchNFTMetadata(tokenURI);
 
     if (metadata.image) {
-      const imageBlob = await downloadFile(metadata.image);
-      imageUrl = URL.createObjectURL(imageBlob);
+      imageUrl = metadata.image;
     }
   } catch {
     // Metadata or image fetch failed — file may be expired

@@ -3,7 +3,8 @@ export {
   uploadFileToDH,
   waitForMSPConfirmOnChain,
   waitForBackendFileReady,
-  downloadFile,
+  checkFileStatus,
+  getDownloadUrl,
   getNftBucketName,
 } from './storageOperations';
 

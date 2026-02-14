@@ -298,3 +298,20 @@ export async function checkFileStatus(bucketId: string, fileKey: string): Promis
     return 'error';
   }
 }
+
+// Extract raw file key from a public download URL
+// e.g. "https://deo-dh-backend.testnet.datahaven-infra.network/download/0xabc..." → "0xabc..."
+export function extractFileKeyFromUrl(url: string): string {
+  const parts = url.split('/download/');
+  if (parts.length < 2) {
+    throw new Error(`Invalid download URL: ${url}`);
+  }
+  return parts[1];
+}
+
+// Derive the NFT bucket ID for a given owner address
+export async function deriveBucketIdForAddress(address: string): Promise<string> {
+  const storageHubClient = getStorageHubClient();
+  const bucketName = getNftBucketName(address);
+  return (await storageHubClient.deriveBucketId(address as `0x${string}`, bucketName)) as string;
+}

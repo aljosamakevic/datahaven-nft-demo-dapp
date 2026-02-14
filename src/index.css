@@ -41,9 +41,39 @@ body {
   min-height: 100vh;
 }
 
-/* Force single-column grids inside the split-view content pane (only when code panel is visible) */
+/* NFT grid: 4 columns when full width (code panel hidden) */
+.nft-grid {
+  grid-template-columns: repeat(1, 1fr);
+}
+@media (min-width: 768px) {
+  .nft-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (min-width: 1024px) {
+  .nft-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+@media (min-width: 1280px) {
+  .nft-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+/* NFT grid: 2 columns when in split view (code panel shown) */
+.split-content .nft-grid {
+  grid-template-columns: repeat(1, 1fr);
+}
+@media (min-width: 768px) {
+  .split-content .nft-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Force single-column grids for non-nft grids inside the split-view content pane */
 @media (min-width: 640px) {
-  .split-content .grid {
+  .split-content .grid:not(.nft-grid) {
     grid-template-columns: 1fr !important;
   }
   .split-content .lg\:col-span-1,

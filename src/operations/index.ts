@@ -6,6 +6,8 @@ export {
   checkFileStatus,
   getDownloadUrl,
   getNftBucketName,
+  extractFileKeyFromUrl,
+  deriveBucketIdForAddress,
 } from './storageOperations';
 
 export {

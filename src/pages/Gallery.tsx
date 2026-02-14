@@ -1,11 +1,18 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { SplitLayout } from '../components/SplitLayout';
+import { StatusBadge } from '../components/StatusBadge';
 import { gallerySnippets } from '../config/codeSnippets';
-import { fetchAllNFTs, burnNFT } from '../operations/nftOperations';
-import type { MintedNFT } from '../types';
+import { fetchAllNFTs, burnNFT, updateTokenURI } from '../operations/nftOperations';
+import { checkFileStatus, extractFileKeyFromUrl, deriveBucketIdForAddress } from '../operations/storageOperations';
+import type { MintedNFT, FileStatus } from '../types';
+
+interface NftFileStatuses {
+  metadata: FileStatus;
+  image: FileStatus;
+}
 
 export function Gallery() {
   const { isAuthenticated, address, handleAuthError } = useAppState();
@@ -15,7 +22,12 @@ export function Gallery() {
   const [error, setError] = useState<string | null>(null);
   const [showMyOnly, setShowMyOnly] = useState(false);
   const [burningTokenId, setBurningTokenId] = useState<number | null>(null);
+  const [updatingTokenId, setUpdatingTokenId] = useState<number | null>(null);
   const [activeSnippet, setActiveSnippet] = useState('fetchNfts');
+  const [expandedTokenId, setExpandedTokenId] = useState<number | null>(null);
+  const [fileStatuses, setFileStatuses] = useState<Record<number, NftFileStatuses>>({});
+
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadNFTs = useCallback(async () => {
     setLoading(true);
@@ -38,6 +50,58 @@ export function Gallery() {
     }
   }, [isAuthenticated, loadNFTs]);
 
+  // Poll file statuses when an NFT is expanded
+  useEffect(() => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+
+    if (expandedTokenId === null) return;
+
+    const nft = nfts.find((n) => n.tokenId === expandedTokenId);
+    if (!nft) return;
+
+    const pollStatuses = async () => {
+      try {
+        const bucketId = await deriveBucketIdForAddress(nft.owner);
+
+        // Check metadata file status
+        const metadataFileKey = nft.tokenURI;
+        const metadataStatus = await checkFileStatus(bucketId, metadataFileKey);
+
+        // Check image file status (extract file key from the image URL in metadata)
+        let imageStatus: FileStatus = 'error';
+        if (nft.metadata?.image) {
+          try {
+            const imageFileKey = extractFileKeyFromUrl(nft.metadata.image);
+            imageStatus = await checkFileStatus(bucketId, imageFileKey);
+          } catch {
+            imageStatus = 'error';
+          }
+        }
+
+        setFileStatuses((prev) => ({
+          ...prev,
+          [expandedTokenId]: { metadata: metadataStatus, image: imageStatus },
+        }));
+      } catch {
+        // Silently fail — statuses will remain as-is
+      }
+    };
+
+    // Poll immediately, then every 10 seconds
+    pollStatuses();
+    pollIntervalRef.current = setInterval(pollStatuses, 10000);
+
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+    };
+  }, [expandedTokenId, nfts]);
+
   const handleBurn = async (tokenId: number) => {
     if (!confirm(`Are you sure you want to burn NFT #${tokenId}? This cannot be undone.`)) {
       return;
@@ -47,8 +111,10 @@ export function Gallery() {
     setActiveSnippet('burnNft');
     try {
       await burnNFT(tokenId);
-      // Remove from list
       setNfts((prev) => prev.filter((nft) => nft.tokenId !== tokenId));
+      if (expandedTokenId === tokenId) {
+        setExpandedTokenId(null);
+      }
     } catch (err) {
       if (handleAuthError(err)) return;
       const message = err instanceof Error ? err.message : 'Failed to burn NFT';
@@ -58,11 +124,38 @@ export function Gallery() {
     }
   };
 
+  const handleUpdateURI = async (tokenId: number) => {
+    const newKey = window.prompt('Enter new metadata file key:');
+    if (!newKey) return;
+
+    setUpdatingTokenId(tokenId);
+    setActiveSnippet('updateUri');
+    try {
+      await updateTokenURI(tokenId, newKey);
+      // Reload NFTs to reflect the change
+      await loadNFTs();
+    } catch (err) {
+      if (handleAuthError(err)) return;
+      const message = err instanceof Error ? err.message : 'Failed to update token URI';
+      setError(message);
+    } finally {
+      setUpdatingTokenId(null);
+    }
+  };
+
+  const toggleExpand = (tokenId: number) => {
+    setExpandedTokenId((prev) => (prev === tokenId ? null : tokenId));
+  };
+
   const filteredNfts = showMyOnly
     ? nfts.filter((nft) => nft.owner.toLowerCase() === address?.toLowerCase())
     : nfts;
 
   const truncateAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+  const truncateFileKey = (key: string) => `${key.slice(0, 10)}...${key.slice(-8)}`;
+
+  // NFT-level alive/dead status: alive if both metadata and image are available
+  const isNftAlive = (nft: MintedNFT) => nft.metadata !== null && nft.imageUrl !== null;
 
   if (!isAuthenticated) {
     return (
@@ -165,10 +258,12 @@ export function Gallery() {
 
       {/* NFT Grid */}
       {filteredNfts.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid nft-grid gap-6">
           {filteredNfts.map((nft) => {
             const isOwner = nft.owner.toLowerCase() === address?.toLowerCase();
-            const isExpired = !nft.metadata || !nft.imageUrl;
+            const alive = isNftAlive(nft);
+            const isExpanded = expandedTokenId === nft.tokenId;
+            const statuses = fileStatuses[nft.tokenId];
 
             return (
               <div
@@ -196,11 +291,23 @@ export function Gallery() {
 
                 {/* Info */}
                 <div className="p-4 space-y-2">
+                  {/* Header: Name + Token ID + Alive/Dead tag */}
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-medium text-white truncate">
                       {nft.metadata?.name || `NFT #${nft.tokenId}`}
                     </h3>
-                    <span className="text-xs text-dh-400 flex-shrink-0 ml-2">#{nft.tokenId}</span>
+                    <div className="flex items-center space-x-2 flex-shrink-0 ml-2">
+                      <span
+                        className={`text-xs px-2 py-0.5 rounded-full ${
+                          alive
+                            ? 'bg-green-500/20 text-green-400'
+                            : 'bg-red-500/20 text-red-400'
+                        }`}
+                      >
+                        {alive ? 'Alive' : 'Dead'}
+                      </span>
+                      <span className="text-xs text-dh-400">#{nft.tokenId}</span>
+                    </div>
                   </div>
 
                   {nft.metadata?.description && (
@@ -214,25 +321,102 @@ export function Gallery() {
                     </span>
                   </div>
 
-                  {isExpired && (
-                    <div className="flex items-center space-x-1 pt-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-yellow-400" />
-                      <span className="text-xs text-yellow-400">Metadata unavailable</span>
-                    </div>
-                  )}
+                  {/* Expand/Collapse toggle */}
+                  <button
+                    onClick={() => toggleExpand(nft.tokenId)}
+                    className="w-full flex items-center justify-center pt-2 text-xs text-dh-400 hover:text-dh-200 transition-colors"
+                  >
+                    <svg
+                      className={`w-4 h-4 mr-1 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
+                    {isExpanded ? 'Hide Details' : 'Show Details'}
+                  </button>
 
-                  {/* Owner Actions */}
-                  {isOwner && (
-                    <div className="flex space-x-2 pt-2">
-                      <Button
-                        onClick={() => handleBurn(nft.tokenId)}
-                        variant="danger"
-                        size="sm"
-                        isLoading={burningTokenId === nft.tokenId}
-                        className="flex-1"
-                      >
-                        Burn
-                      </Button>
+                  {/* Expanded Detail Panel */}
+                  {isExpanded && (
+                    <div className="pt-3 space-y-4 border-t border-dh-700">
+                      {/* File Status Section */}
+                      <div className="space-y-2">
+                        <h4 className="text-xs font-medium text-dh-300 uppercase tracking-wider">File Status</h4>
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1 min-w-0">
+                              <span className="text-xs text-dh-400">Metadata</span>
+                              <p className="text-xs font-mono text-dh-200 truncate" title={nft.tokenURI}>
+                                {truncateFileKey(nft.tokenURI)}
+                              </p>
+                            </div>
+                            <div className="flex-shrink-0 ml-2">
+                              {statuses ? (
+                                <StatusBadge status={statuses.metadata} />
+                              ) : (
+                                <span className="text-xs text-dh-500">Loading...</span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1 min-w-0">
+                              <span className="text-xs text-dh-400">Image</span>
+                              <p className="text-xs font-mono text-dh-200 truncate" title={nft.metadata?.image || 'N/A'}>
+                                {nft.metadata?.image
+                                  ? truncateFileKey(extractFileKeyFromUrl(nft.metadata.image))
+                                  : 'N/A'}
+                              </p>
+                            </div>
+                            <div className="flex-shrink-0 ml-2">
+                              {statuses ? (
+                                <StatusBadge status={statuses.image} />
+                              ) : (
+                                <span className="text-xs text-dh-500">Loading...</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Metadata JSON Section */}
+                      <div className="space-y-2">
+                        <h4 className="text-xs font-medium text-dh-300 uppercase tracking-wider">Metadata JSON</h4>
+                        {nft.metadata ? (
+                          <pre className="bg-dh-900 rounded-lg p-3 text-xs text-dh-200 font-mono overflow-x-auto max-h-40 overflow-y-auto">
+                            {JSON.stringify(nft.metadata, null, 2)}
+                          </pre>
+                        ) : (
+                          <p className="text-xs text-dh-500 italic">Metadata unavailable — file may have expired</p>
+                        )}
+                      </div>
+
+                      {/* Owner Actions */}
+                      {isOwner && (
+                        <div className="space-y-2">
+                          <h4 className="text-xs font-medium text-dh-300 uppercase tracking-wider">Actions</h4>
+                          <div className="flex space-x-2">
+                            <Button
+                              onClick={() => handleUpdateURI(nft.tokenId)}
+                              variant="secondary"
+                              size="sm"
+                              isLoading={updatingTokenId === nft.tokenId}
+                              className="flex-1"
+                            >
+                              Update Token URI
+                            </Button>
+                            <Button
+                              onClick={() => handleBurn(nft.tokenId)}
+                              variant="danger"
+                              size="sm"
+                              isLoading={burningTokenId === nft.tokenId}
+                              className="flex-1"
+                            >
+                              Burn
+                            </Button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

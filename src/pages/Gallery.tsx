@@ -10,8 +10,9 @@ import { checkFileStatus, extractFileKeyFromUrl, deriveBucketIdForAddress } from
 import type { MintedNFT, FileStatus } from '../types';
 
 interface NftFileStatuses {
-  metadata: FileStatus;
-  image: FileStatus;
+  metadata: FileStatus | null;
+  image: FileStatus | null;
+  error?: string;
 }
 
 export function Gallery() {
@@ -71,13 +72,13 @@ export function Gallery() {
         const metadataStatus = await checkFileStatus(bucketId, metadataFileKey);
 
         // Check image file status (extract file key from the image URL in metadata)
-        let imageStatus: FileStatus = 'error';
+        let imageStatus: FileStatus | null = null;
         if (nft.metadata?.image) {
           try {
             const imageFileKey = extractFileKeyFromUrl(nft.metadata.image);
             imageStatus = await checkFileStatus(bucketId, imageFileKey);
           } catch {
-            imageStatus = 'error';
+            imageStatus = null;
           }
         }
 
@@ -85,8 +86,16 @@ export function Gallery() {
           ...prev,
           [expandedTokenId]: { metadata: metadataStatus, image: imageStatus },
         }));
-      } catch {
-        // Silently fail — statuses will remain as-is
+      } catch (err) {
+        console.warn('Failed to poll file statuses:', err);
+        setFileStatuses((prev) => ({
+          ...prev,
+          [expandedTokenId]: {
+            metadata: null,
+            image: null,
+            error: err instanceof Error ? err.message : 'Failed to fetch file statuses',
+          },
+        }));
       }
     };
 
@@ -147,9 +156,7 @@ export function Gallery() {
     setExpandedTokenId((prev) => (prev === tokenId ? null : tokenId));
   };
 
-  const filteredNfts = showMyOnly
-    ? nfts.filter((nft) => nft.owner.toLowerCase() === address?.toLowerCase())
-    : nfts;
+  const filteredNfts = showMyOnly ? nfts.filter((nft) => nft.owner.toLowerCase() === address?.toLowerCase()) : nfts;
 
   const truncateAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`;
   const truncateFileKey = (key: string) => `${key.slice(0, 10)}...${key.slice(-8)}`;
@@ -168,7 +175,9 @@ export function Gallery() {
         <Card>
           <div className="text-center py-8">
             <p className="text-dh-300 mb-4">Please connect your wallet and authenticate to view the gallery.</p>
-            <a href="/" className="text-sage-400 hover:text-sage-300">Go to Dashboard</a>
+            <a href="/" className="text-sage-400 hover:text-sage-300">
+              Go to Dashboard
+            </a>
           </div>
         </Card>
       </SplitLayout>
@@ -218,9 +227,7 @@ export function Gallery() {
           <button
             onClick={() => setShowMyOnly(!showMyOnly)}
             className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              showMyOnly
-                ? 'bg-sage-600 text-white'
-                : 'bg-dh-700 text-dh-200 hover:bg-dh-600'
+              showMyOnly ? 'bg-sage-600 text-white' : 'bg-dh-700 text-dh-200 hover:bg-dh-600'
             }`}
           >
             {showMyOnly ? 'My NFTs' : 'All NFTs'}
@@ -249,9 +256,11 @@ export function Gallery() {
         <Card>
           <div className="text-center py-8">
             <p className="text-dh-300 mb-4">
-              {showMyOnly ? 'You haven\'t minted any NFTs yet.' : 'No NFTs have been minted yet.'}
+              {showMyOnly ? "You haven't minted any NFTs yet." : 'No NFTs have been minted yet.'}
             </p>
-            <a href="/mint" className="text-sage-400 hover:text-sage-300">Mint your first NFT</a>
+            <a href="/mint" className="text-sage-400 hover:text-sage-300">
+              Mint your first NFT
+            </a>
           </div>
         </Card>
       )}
@@ -266,10 +275,7 @@ export function Gallery() {
             const statuses = fileStatuses[nft.tokenId];
 
             return (
-              <div
-                key={nft.tokenId}
-                className="bg-dh-800 rounded-lg border border-dh-700 overflow-hidden"
-              >
+              <div key={nft.tokenId} className="bg-dh-800 rounded-lg border border-dh-700 overflow-hidden">
                 {/* Image */}
                 <div className="aspect-square bg-dh-900 flex items-center justify-center">
                   {nft.imageUrl ? (
@@ -280,8 +286,18 @@ export function Gallery() {
                     />
                   ) : (
                     <div className="text-center p-4">
-                      <svg className="w-12 h-12 mx-auto text-dh-600 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                      <svg
+                        className="w-12 h-12 mx-auto text-dh-600 mb-2"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z"
+                        />
                       </svg>
                       <p className="text-sm text-dh-500">File Expired</p>
                       <p className="text-xs text-dh-600 mt-1">Storage payment may have lapsed</p>
@@ -299,9 +315,7 @@ export function Gallery() {
                     <div className="flex items-center space-x-2 flex-shrink-0 ml-2">
                       <span
                         className={`text-xs px-2 py-0.5 rounded-full ${
-                          alive
-                            ? 'bg-green-500/20 text-green-400'
-                            : 'bg-red-500/20 text-red-400'
+                          alive ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
                         }`}
                       >
                         {alive ? 'Alive' : 'Dead'}
@@ -342,41 +356,58 @@ export function Gallery() {
                     <div className="pt-3 space-y-4 border-t border-dh-700">
                       {/* File Status Section */}
                       <div className="space-y-2">
-                        <h4 className="text-xs font-medium text-dh-300 uppercase tracking-wider">File Status</h4>
-                        <div className="space-y-1.5">
-                          <div className="flex items-center justify-between">
-                            <div className="flex-1 min-w-0">
-                              <span className="text-xs text-dh-400">Metadata</span>
-                              <p className="text-xs font-mono text-dh-200 truncate" title={nft.tokenURI}>
-                                {truncateFileKey(nft.tokenURI)}
-                              </p>
+                        <h4 className="text-xs font-medium text-dh-300 uppercase tracking-wider">
+                          DataHaven File Status
+                        </h4>
+                        {statuses?.error ? (
+                          <p className="text-xs text-red-400">{statuses.error}</p>
+                        ) : (
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <div className="flex-1 min-w-0">
+                                <span className="text-xs text-dh-400">Metadata File Key</span>
+                                <p className="text-xs font-mono text-dh-200 truncate" title={nft.tokenURI}>
+                                  {truncateFileKey(nft.tokenURI)}
+                                </p>
+                              </div>
+                              <div className="flex-shrink-0 ml-2">
+                                {statuses ? (
+                                  statuses.metadata !== null ? (
+                                    <StatusBadge status={statuses.metadata} />
+                                  ) : (
+                                    <span className="text-xs text-dh-500">Not Found</span>
+                                  )
+                                ) : (
+                                  <span className="text-xs text-dh-500">Loading...</span>
+                                )}
+                              </div>
                             </div>
-                            <div className="flex-shrink-0 ml-2">
-                              {statuses ? (
-                                <StatusBadge status={statuses.metadata} />
-                              ) : (
-                                <span className="text-xs text-dh-500">Loading...</span>
-                              )}
+                            <div className="flex items-center justify-between">
+                              <div className="flex-1 min-w-0">
+                                <span className="text-xs text-dh-400">Image File Key</span>
+                                <p
+                                  className="text-xs font-mono text-dh-200 truncate"
+                                  title={nft.metadata?.image || 'N/A'}
+                                >
+                                  {nft.metadata?.image
+                                    ? truncateFileKey(extractFileKeyFromUrl(nft.metadata.image))
+                                    : 'N/A'}
+                                </p>
+                              </div>
+                              <div className="flex-shrink-0 ml-2">
+                                {statuses ? (
+                                  statuses.image !== null ? (
+                                    <StatusBadge status={statuses.image} />
+                                  ) : (
+                                    <span className="text-xs text-dh-500">Not Found</span>
+                                  )
+                                ) : (
+                                  <span className="text-xs text-dh-500">Loading...</span>
+                                )}
+                              </div>
                             </div>
                           </div>
-                          <div className="flex items-center justify-between">
-                            <div className="flex-1 min-w-0">
-                              <span className="text-xs text-dh-400">Image</span>
-                              <p className="text-xs font-mono text-dh-200 truncate" title={nft.metadata?.image || 'N/A'}>
-                                {nft.metadata?.image
-                                  ? truncateFileKey(extractFileKeyFromUrl(nft.metadata.image))
-                                  : 'N/A'}
-                              </p>
-                            </div>
-                            <div className="flex-shrink-0 ml-2">
-                              {statuses ? (
-                                <StatusBadge status={statuses.image} />
-                              ) : (
-                                <span className="text-xs text-dh-500">Loading...</span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
+                        )}
                       </div>
 
                       {/* Metadata JSON Section */}

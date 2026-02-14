@@ -1,6 +1,6 @@
-import type { Bucket, FileListResponse, HealthStatus, InfoResponse, UserInfo } from '@storagehub-sdk/msp-client';
+import type { Bucket, FileListResponse, HealthStatus, InfoResponse, UserInfo, StorageFileInfo } from '@storagehub-sdk/msp-client';
 
-export type { Bucket, FileListResponse, HealthStatus, InfoResponse, UserInfo };
+export type { Bucket, FileListResponse, HealthStatus, InfoResponse, UserInfo, StorageFileInfo };
 
 export interface AppState {
   isWalletConnected: boolean;
@@ -41,11 +41,13 @@ export interface MintProgress {
   message: string;
 }
 
-export type FileStatus = 'pending' | 'processing' | 'ready' | 'error';
+// FileStatus derived from SDK's StorageFileInfo — not barrel-exported by the SDK directly
+export type FileStatus = StorageFileInfo['status'];
+// Resolves to: "inProgress" | "ready" | "expired" | "revoked" | "rejected" | "deletionInProgress"
 
 export interface FileConfirmation {
   label: string;
   fileKey: string;
-  status: FileStatus;
+  status: FileStatus | null; // null = not yet polled / file not found
   error?: string;
 }

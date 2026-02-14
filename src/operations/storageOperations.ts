@@ -1,6 +1,5 @@
 import '@storagehub/api-augment';
 import { FileManager, ReplicationLevel } from '@storagehub-sdk/core';
-import type { FileInfo } from '@storagehub-sdk/core';
 import { TypeRegistry } from '@polkadot/types';
 import type { AccountId20, H256 } from '@polkadot/types/interfaces';
 import {
@@ -10,10 +9,11 @@ import {
   getPolkadotApi,
   buildGasTxOpts,
 } from '../services/clientService';
-import { getMspClient, getMspInfo, getValueProps, authenticateUser, isAuthenticated } from '../services/mspService';
+import { getMspClient, connectToMsp, getMspInfo, getValueProps, authenticateUser, isAuthenticated } from '../services/mspService';
 import { NETWORK } from '../config/networks';
 import type { PalletFileSystemStorageRequestMetadata } from '@polkadot/types/lookup';
 import type { FileStatus } from '../types';
+import type { StorageFileInfo } from '@storagehub-sdk/msp-client';
 
 // Build a public download URL for a DataHaven file key
 export function getDownloadUrl(fileKey: string): string {
@@ -244,7 +244,7 @@ export async function waitForMSPConfirmOnChain(fileKey: string): Promise<void> {
 }
 
 // Wait for backend to mark file as ready
-export async function waitForBackendFileReady(bucketId: string, fileKey: string): Promise<FileInfo> {
+export async function waitForBackendFileReady(bucketId: string, fileKey: string): Promise<StorageFileInfo> {
   const mspClient = getMspClient();
   const maxAttempts = 60;
   const delayMs = 5000;
@@ -278,24 +278,38 @@ export async function waitForBackendFileReady(bucketId: string, fileKey: string)
 }
 
 // Check the current status of a file (single poll, not a loop)
-export async function checkFileStatus(bucketId: string, fileKey: string): Promise<FileStatus> {
-  const mspClient = getMspClient();
+// Returns the SDK FileStatus directly, or null if file not yet indexed (404)
+export async function checkFileStatus(bucketId: string, fileKey: string): Promise<FileStatus | null> {
+  const mspClient = await connectToMsp(); // lazy connect — fixes cases where MSP client isn't yet initialized
+
+  // Ensure authenticated — getFileInfo requires auth
+  if (!isAuthenticated()) {
+    await authenticateUser();
+  }
 
   try {
     const fileInfo = await mspClient.files.getFileInfo(bucketId, fileKey);
-
-    if (fileInfo.status === 'ready') {
-      return 'ready';
-    } else if (fileInfo.status === 'revoked' || fileInfo.status === 'rejected' || fileInfo.status === 'expired') {
-      return 'error';
-    }
-    return 'processing';
+    return fileInfo.status; // return SDK status directly
   } catch (error: unknown) {
-    const err = error as { status?: number; body?: { error?: string } };
+    const err = error as { status?: number; body?: { error?: string }; response?: { status?: number } };
     if (err?.status === 404 || err?.body?.error === 'Not found: Record') {
-      return 'pending';
+      return null; // file not yet indexed
     }
-    return 'error';
+    // On 401, re-authenticate and retry once
+    if (err?.status === 401 || err?.response?.status === 401) {
+      await authenticateUser();
+      try {
+        const fileInfo = await mspClient.files.getFileInfo(bucketId, fileKey);
+        return fileInfo.status;
+      } catch (retryError: unknown) {
+        const retryErr = retryError as { status?: number; body?: { error?: string } };
+        if (retryErr?.status === 404 || retryErr?.body?.error === 'Not found: Record') {
+          return null;
+        }
+        throw retryError;
+      }
+    }
+    throw error; // re-throw unexpected errors
   }
 }
 
@@ -313,5 +327,9 @@ export function extractFileKeyFromUrl(url: string): string {
 export async function deriveBucketIdForAddress(address: string): Promise<string> {
   const storageHubClient = getStorageHubClient();
   const bucketName = getNftBucketName(address);
-  return (await storageHubClient.deriveBucketId(address as `0x${string}`, bucketName)) as string;
+  const bucketId = await storageHubClient.deriveBucketId(address as `0x${string}`, bucketName);
+  if (!bucketId) {
+    throw new Error(`deriveBucketId returned ${bucketId} for address ${address}`);
+  }
+  return bucketId as string;
 }

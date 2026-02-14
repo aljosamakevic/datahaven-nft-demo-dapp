@@ -126,8 +126,8 @@ export function MintNFT() {
 
       // Start background file status tracking
       setFileConfirmations([
-        { label: 'Image', fileKey: imageFileKey, status: 'pending' },
-        { label: 'Metadata', fileKey: metadataFileKey, status: 'pending' },
+        { label: 'Image', fileKey: imageFileKey, status: null },
+        { label: 'Metadata', fileKey: metadataFileKey, status: null },
       ]);
     } catch (err) {
       if (handleAuthError(err)) return;
@@ -137,22 +137,30 @@ export function MintNFT() {
     }
   };
 
+  // Terminal file statuses — no point polling further once reached
+  const terminalStatuses = ['ready', 'expired', 'revoked', 'rejected'] as const;
+  const isTerminal = (status: string | null) => status !== null && terminalStatuses.includes(status as typeof terminalStatuses[number]);
+
   // Background polling for file confirmation status
   const pollFileStatuses = useCallback(async () => {
     if (!mintBucketId || fileConfirmations.length === 0) return;
 
     const updated = await Promise.all(
       fileConfirmations.map(async (fc) => {
-        if (fc.status === 'ready' || fc.status === 'error') return fc;
-        const status = await checkFileStatus(mintBucketId, fc.fileKey);
-        return { ...fc, status };
+        if (isTerminal(fc.status)) return fc;
+        try {
+          const status = await checkFileStatus(mintBucketId, fc.fileKey);
+          return { ...fc, status };
+        } catch {
+          return fc; // keep current status on unexpected error
+        }
       })
     );
 
     setFileConfirmations(updated);
 
-    // Stop polling when all files are ready or errored
-    if (updated.every((fc) => fc.status === 'ready' || fc.status === 'error')) {
+    // Stop polling when all files have terminal statuses
+    if (updated.every((fc) => isTerminal(fc.status))) {
       if (pollingRef.current) {
         clearInterval(pollingRef.current);
         pollingRef.current = null;
@@ -234,16 +242,23 @@ export function MintNFT() {
     return steps;
   };
 
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = (status: string | null) => {
+    if (status === null) {
+      return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-500/20 text-yellow-400">Pending</span>;
+    }
     switch (status) {
-      case 'pending':
-        return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-500/20 text-yellow-400">Pending</span>;
-      case 'processing':
-        return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-500/20 text-blue-400">Processing</span>;
+      case 'inProgress':
+        return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-500/20 text-blue-400">In Progress</span>;
       case 'ready':
         return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-500/20 text-green-400">Ready</span>;
-      case 'error':
-        return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/20 text-red-400">Error</span>;
+      case 'expired':
+        return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/20 text-red-400">Expired</span>;
+      case 'revoked':
+        return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/20 text-red-400">Revoked</span>;
+      case 'rejected':
+        return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/20 text-red-400">Rejected</span>;
+      case 'deletionInProgress':
+        return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-500/20 text-yellow-400">Deleting</span>;
       default:
         return null;
     }
@@ -464,7 +479,7 @@ export function MintNFT() {
                       {getStatusBadge(fc.status)}
                     </div>
                   ))}
-                  {!fileConfirmations.every((fc) => fc.status === 'ready' || fc.status === 'error') && (
+                  {!fileConfirmations.every((fc) => isTerminal(fc.status)) && (
                     <p className="text-xs text-dh-500">
                       Files may take up to 11 minutes to become downloadable while the network confirms them.
                     </p>

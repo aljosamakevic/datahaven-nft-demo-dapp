@@ -4,32 +4,37 @@ A demo dApp for minting NFTs whose metadata and images are stored on the DataHav
 
 ## Features
 
-- **Wallet Connection** - EVM Wallet interaction with automatic network switching to DataHaven testnet
-- **Connection and SIWE Authentication with Main Storage Provider** - Prerequisite for storage and NFT operations
-- **NFT Minting** - Upload an image to DataHaven, generate ERC-721 metadata, and mint an NFT on-chain in a guided wizard
-- **NFT Gallery** - Browse all minted NFTs with images fetched from DataHaven, filter by ownership
-- **Mortal NFTs** - NFTs whose storage can expire; owners can update the metadata URI after re-uploading or burn the NFT if files are permanently lost
-- **Storage Provider Monitoring** - View MSP connection status and health
+- **One-click connection** -- connects wallet, MSP, and authenticates via SIWE in a single flow from the navbar (2 wallet signatures)
+- **NFT minting** -- upload an image to DataHaven, generate ERC-721 metadata, and mint an NFT on-chain in a guided wizard
+- **NFT gallery** -- browse all minted NFTs with images fetched from DataHaven, filter by ownership, expandable detail panels
+- **File status monitoring** -- real-time polling of on-chain file statuses (ready, in progress, expired, deletion in progress)
+- **Update NFT files** -- upload a new image and metadata, then update the on-chain token URI to point to the new files
+- **Delete NFT files** -- request on-chain file deletion from DataHaven while keeping the token on-chain
+- **Burn NFTs** -- destroy the on-chain token and automatically delete associated DataHaven files
+- **Mortal NFTs** -- NFTs that are "alive" when files are accessible and "dead" when storage expires or files are deleted
+- **Interactive code panel** -- split-view layout showing the relevant source code for each operation
 
 ## Smart Contract
 
 The `DataHavenNFT` contract (`contracts/DataHavenNFT.sol`) is a simple ERC-721 with:
 
-- `mint(uri)` - Open minting, anyone can mint with a metadata URI (DataHaven file key)
-- `updateTokenURI(tokenId, newUri)` - Owner can re-point to new metadata after re-uploading expired files
-- `burn(tokenId)` - Owner can destroy the NFT if underlying files are permanently lost
-- `totalSupply()` - Returns the total number of minted tokens
+- `mint(uri)` -- open minting, anyone can mint with a metadata URI (DataHaven file key)
+- `updateTokenURI(tokenId, newUri)` -- owner can re-point to new metadata after re-uploading expired files
+- `burn(tokenId)` -- owner can destroy the NFT if underlying files are permanently lost
+- `totalSupply()` -- returns the total number of minted tokens
 
 After deploying the contract, update the address in `src/config/nftContract.ts`.
 
 ## Tech Stack
 
 - **React 19** with TypeScript
-- **Vite** - Build tool and dev server
-- **Tailwind CSS** - Styling
-- **viem** - EVM wallet interaction and NFT contract calls
-- **@polkadot/api** - Polkadot chain interaction
-- **@storagehub-sdk** - StorageHub SDK for storage operations (@storagehub-sdk/core and @storagehub-sdk/msp-client)
+- **Vite 7** -- build tool and dev server
+- **Tailwind CSS v4** -- styling with custom DataHaven theme
+- **viem** -- EVM wallet interaction and NFT contract calls
+- **@polkadot/api** -- Substrate chain queries
+- **@storagehub-sdk/core** -- `StorageHubClient` and `FileManager` for on-chain storage operations
+- **@storagehub-sdk/msp-client** -- `MspClient` for MSP HTTP API (file upload, auth, info)
+- **react-router-dom** -- client-side routing
 
 ## Getting Started
 
@@ -51,7 +56,7 @@ pnpm install
 pnpm dev
 ```
 
-The app will be available at `http://localhost:5173`
+The app will be available at `http://localhost:5173`. The DataHaven Testnet network will be added to your wallet automatically when you connect.
 
 ### Build
 
@@ -69,37 +74,103 @@ pnpm lint
 
 ```
 src/
-├── pages/           # Dashboard, MintNFT, Gallery pages
-├── components/      # Reusable UI components
-├── context/         # React Context for global state
-├── hooks/           # Custom React hooks
-├── services/        # Wallet & MSP client services
-├── operations/      # Storage and NFT operation logic
-├── config/          # Network config, NFT contract ABI, code snippets
-└── types/           # TypeScript type definitions
+  App.tsx                         # Router (/ redirects to /mint)
+  main.tsx                        # React entry point
+  index.css                       # Tailwind imports, custom theme, grid styles
+
+  components/
+    Layout.tsx                    # Navbar with WalletDropdown, page shell
+    WalletDropdown.tsx            # Connect button / wallet status dropdown
+    Button.tsx                    # Reusable button (primary/secondary/danger)
+    Card.tsx                      # Content card wrapper
+    StatusBadge.tsx               # Colored status badges (connected, healthy, etc.)
+    SplitLayout.tsx               # Two-column layout with code panel toggle
+    CodePanel.tsx                 # Syntax-highlighted code snippet viewer
+    CodeToggleButton.tsx          # Toggle for code panel visibility
+    ProgressStepper.tsx           # Step indicator for mint flow
+    Icons.tsx                     # SVG icon components
+
+  pages/
+    MintNFT.tsx                   # Mint flow: upload image/metadata, mint NFT
+    Gallery.tsx                   # NFT grid with expand, update, delete, burn
+
+  context/
+    AppContext.tsx                 # Global state: wallet, MSP, auth, one-click connect
+
+  hooks/
+    useAppState.ts                # Typed hook for AppContext
+    useCodePanel.ts               # Code panel visibility state
+
+  config/
+    networks.ts                   # DataHaven Testnet config (RPC, MSP, chain ID)
+    nftContract.ts                # NFT contract address and ABI
+    codeSnippets.ts               # Source code snippets for the code panel
+
+  services/
+    clientService.ts              # Wallet, StorageHubClient, Polkadot API singletons
+    mspService.ts                 # MspClient singleton, SIWE auth, session management
+    index.ts                      # Service re-exports
+
+  operations/
+    nftOperations.ts              # Mint, burn, update token URI, fetch NFTs
+    storageOperations.ts          # Bucket, upload, delete, file status, download URLs
+    index.ts                      # Operation re-exports
+
+  types/
+    index.ts                      # AppState, MintedNFT, FileStatus, SDK type re-exports
+
 contracts/
-└── DataHavenNFT.sol # Solidity source (deploy separately)
+  DataHavenNFT.sol                # Solidity source (deploy separately)
 ```
 
 ## Network Configuration
 
-The app connects to the DataHaven Testnet:
-
 | Property | Value |
 |----------|-------|
 | Network | DataHaven Testnet |
-| Chain ID | 55931 (0xda7b) |
+| Chain ID | 55931 (`0xda7b`) |
 | RPC URL | `https://services.datahaven-testnet.network/testnet` |
+| MSP URL | `https://deo-dh-backend.testnet.datahaven-infra.network/` |
+| NFT Contract | `0x81c56bB494417C1840d34510FE1fbE251ee83B51` |
 | Currency | MOCK (18 decimals) |
 
 ## Usage Flow
 
-1. **Connect Wallet** - Connect your MetaMask wallet (auto-switches to DataHaven testnet)
-2. **Connect to MSP** - Establish connection to the storage provider
-3. **Authenticate** - Sign a message to authenticate with the network (SIWE)
-4. **Mint NFT** - Select an image, enter a name and description, and mint — the dApp handles bucket creation, image upload, metadata upload, and on-chain minting
-5. **Browse Gallery** - View all minted NFTs with images loaded from DataHaven
-6. **Manage NFTs** - Update metadata URI or burn NFTs you own
+1. **Connect** -- click "Connect" in the navbar; the app connects your wallet, switches to DataHaven Testnet, establishes the MSP connection, and authenticates via SIWE in one flow
+2. **Mint NFT** -- select an image, enter a name and description, and mint; the dApp handles bucket creation, image upload, metadata upload, on-chain confirmation, and minting
+3. **Browse Gallery** -- view all minted NFTs with images loaded from DataHaven; expand any card to see file statuses, metadata JSON, and owner actions
+4. **Update NFT** -- upload a new image and metadata, then update the on-chain token URI
+5. **Delete files** -- remove files from DataHaven storage while keeping the token on-chain (NFT shows as "Dead")
+6. **Burn NFT** -- destroy the token on-chain and delete its DataHaven files
+
+## Architecture
+
+### Connection Flow
+
+The app uses a one-click connection accessible from the navbar on any page:
+
+1. **Init WASM** -- StorageHub SDK requires WASM initialization (once per session)
+2. **Connect Wallet** -- MetaMask popup for account access, auto-switches to DataHaven Testnet
+3. **Init Polkadot API** -- connects to the Substrate side of the chain via WebSocket
+4. **Connect to MSP** -- establishes connection to the storage provider (no user interaction)
+5. **Authenticate (SIWE)** -- MetaMask popup to sign a SIWE message, receives a session token
+
+Each step commits its success to state immediately, so partial failures preserve progress. The wallet dropdown in the navbar shows connection status and provides health checks and disconnect.
+
+### Storage Flow
+
+1. **Ensure bucket** -- derives a per-user bucket (`nft-assets-{address}`) and creates it on-chain if needed
+2. **Upload file** -- hashes with `FileManager`, registers on-chain via `issueStorageRequest`, uploads bytes to MSP
+3. **Wait for confirmation** -- polls on-chain until the MSP confirms the file
+4. **Public download** -- files are accessible at `{mspUrl}download/{fileKey}`
+
+### NFT Lifecycle
+
+- **Alive** -- both metadata and image files are accessible on DataHaven
+- **Dead** -- files are expired or deleted; gallery shows a placeholder image
+- **Update** -- upload new files, call `updateTokenURI` to re-point the token
+- **Delete files** -- request on-chain deletion; token remains but shows as Dead
+- **Burn** -- destroy token on-chain, then best-effort delete DataHaven files
 
 ## License
 

@@ -4,11 +4,10 @@ export interface CodeSnippet {
   code: string;
 }
 
-export const dashboardSnippets: CodeSnippet[] = [
-  {
-    id: 'connectFlow',
-    title: 'Connect & Authenticate',
-    code: `// src/context/AppContext.tsx
+const connectFlowSnippet: CodeSnippet = {
+  id: 'connectFlow',
+  title: 'Connect & Authenticate',
+  code: `// src/context/AppContext.tsx
 
 // One-click connect: wallet → MSP → SIWE auth
 const connectAndAuthenticate = async () => {
@@ -59,10 +58,10 @@ async function authenticateUser(): Promise<UserInfo> {
   sessionToken = siweSession.token;
   return await client.auth.getProfile();
 }`,
-  },
-];
+};
 
 export const mintSnippets: CodeSnippet[] = [
+  connectFlowSnippet,
   {
     id: 'ensureBucket',
     title: 'Ensure Bucket',
@@ -218,6 +217,7 @@ export async function mintNFT(
 ];
 
 export const gallerySnippets: CodeSnippet[] = [
+  connectFlowSnippet,
   {
     id: 'fetchNfts',
     title: 'Fetch NFTs',

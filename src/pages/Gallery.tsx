@@ -26,12 +26,11 @@ interface NftFileStatuses {
 }
 
 export function Gallery() {
-  const { isAuthenticated, address, handleAuthError } = useAppState();
+  const { isAuthenticated, address, handleAuthError, connectAndAuthenticate, isLoading: connectLoading } = useAppState();
 
   const [nfts, setNfts] = useState<MintedNFT[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showMyOnly, setShowMyOnly] = useState(false);
   const [burningTokenId, setBurningTokenId] = useState<number | null>(null);
   const [updatingTokenId, setUpdatingTokenId] = useState<number | null>(null);
   const [deletingTokenId, setDeletingTokenId] = useState<number | null>(null);
@@ -275,9 +274,8 @@ export function Gallery() {
     setExpandedTokenId((prev) => (prev === tokenId ? null : tokenId));
   };
 
-  const filteredNfts = showMyOnly ? nfts.filter((nft) => nft.owner.toLowerCase() === address?.toLowerCase()) : nfts;
+  const myNfts = nfts.filter((nft) => nft.owner.toLowerCase() === address?.toLowerCase());
 
-  const truncateAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`;
   const truncateFileKey = (key: string) => `${key.slice(0, 10)}...${key.slice(-8)}`;
 
   // NFT-level alive/dead status: alive if both metadata and image are available
@@ -289,14 +287,14 @@ export function Gallery() {
         snippets={gallerySnippets}
         defaultSnippetId="fetchNfts"
         pageTitle="NFT Gallery"
-        pageDescription="Browse all minted NFTs with images stored on DataHaven."
+        pageDescription="Browse your minted NFTs with images stored on DataHaven."
       >
         <Card>
           <div className="text-center py-8">
             <p className="text-dh-300 mb-4">Please connect your wallet and authenticate to view the gallery.</p>
-            <a href="/" className="text-sage-400 hover:text-sage-300">
-              Go to Dashboard
-            </a>
+            <Button onClick={connectAndAuthenticate} isLoading={connectLoading}>
+              Connect & Authenticate
+            </Button>
           </div>
         </Card>
       </SplitLayout>
@@ -308,7 +306,7 @@ export function Gallery() {
       snippets={gallerySnippets}
       defaultSnippetId="fetchNfts"
       pageTitle="NFT Gallery"
-      pageDescription="Browse all minted NFTs with images stored on DataHaven."
+      pageDescription="Browse your minted NFTs with images stored on DataHaven."
       activeSnippetId={activeSnippet}
       onSnippetChange={setActiveSnippet}
     >
@@ -339,21 +337,11 @@ export function Gallery() {
 
       {/* Controls */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-4">
-          <Button onClick={loadNFTs} variant="secondary" size="sm" isLoading={loading}>
-            Refresh
-          </Button>
-          <button
-            onClick={() => setShowMyOnly(!showMyOnly)}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              showMyOnly ? 'bg-sage-600 text-white' : 'bg-dh-700 text-dh-200 hover:bg-dh-600'
-            }`}
-          >
-            {showMyOnly ? 'My NFTs' : 'All NFTs'}
-          </button>
-        </div>
+        <Button onClick={loadNFTs} variant="secondary" size="sm" isLoading={loading}>
+          Refresh
+        </Button>
         <p className="text-sm text-dh-400">
-          {filteredNfts.length} NFT{filteredNfts.length !== 1 ? 's' : ''}
+          {myNfts.length} NFT{myNfts.length !== 1 ? 's' : ''}
         </p>
       </div>
 
@@ -371,12 +359,10 @@ export function Gallery() {
       )}
 
       {/* Empty State */}
-      {!loading && filteredNfts.length === 0 && (
+      {!loading && myNfts.length === 0 && (
         <Card>
           <div className="text-center py-8">
-            <p className="text-dh-300 mb-4">
-              {showMyOnly ? "You haven't minted any NFTs yet." : 'No NFTs have been minted yet.'}
-            </p>
+            <p className="text-dh-300 mb-4">You haven't minted any NFTs yet.</p>
             <a href="/mint" className="text-sage-400 hover:text-sage-300">
               Mint your first NFT
             </a>
@@ -385,10 +371,9 @@ export function Gallery() {
       )}
 
       {/* NFT Grid */}
-      {filteredNfts.length > 0 && (
+      {myNfts.length > 0 && (
         <div className="grid nft-grid gap-6">
-          {filteredNfts.map((nft) => {
-            const isOwner = nft.owner.toLowerCase() === address?.toLowerCase();
+          {myNfts.map((nft) => {
             const alive = isNftAlive(nft);
             const isExpanded = expandedTokenId === nft.tokenId;
             const statuses = fileStatuses[nft.tokenId];
@@ -446,13 +431,6 @@ export function Gallery() {
                   {nft.metadata?.description && (
                     <p className="text-xs text-dh-300 line-clamp-2">{nft.metadata.description}</p>
                   )}
-
-                  <div className="flex items-center justify-between pt-1">
-                    <span className="text-xs text-dh-400">Owner</span>
-                    <span className="text-xs font-mono text-dh-200">
-                      {isOwner ? 'You' : truncateAddress(nft.owner)}
-                    </span>
-                  </div>
 
                   {/* Expand/Collapse toggle */}
                   <button
@@ -542,8 +520,7 @@ export function Gallery() {
                       </div>
 
                       {/* Owner Actions */}
-                      {isOwner &&
-                        (editingTokenId === nft.tokenId ? (
+                      {editingTokenId === nft.tokenId ? (
                           <div className="space-y-3">
                             <h4 className="text-xs font-medium text-dh-300 uppercase tracking-wider">Update NFT</h4>
                             <div>
@@ -642,7 +619,7 @@ export function Gallery() {
                               </Button>
                             </div>
                           </div>
-                        ))}
+                        )}
                     </div>
                   )}
                 </div>

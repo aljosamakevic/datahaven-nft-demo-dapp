@@ -16,7 +16,7 @@ import { mintNFT } from '../operations/nftOperations';
 import type { MintProgress, FileConfirmation } from '../types';
 
 export function MintNFT() {
-  const { isAuthenticated, address, handleAuthError } = useAppState();
+  const { isAuthenticated, address, handleAuthError, connectAndAuthenticate, isLoading } = useAppState();
 
   const [nftName, setNftName] = useState('');
   const [nftDescription, setNftDescription] = useState('');
@@ -277,7 +277,9 @@ export function MintNFT() {
         <Card>
           <div className="text-center py-8">
             <p className="text-dh-300 mb-4">Please connect your wallet and authenticate to mint NFTs.</p>
-            <a href="/" className="text-sage-400 hover:text-sage-300">Go to Dashboard</a>
+            <Button onClick={connectAndAuthenticate} isLoading={isLoading}>
+              Connect & Authenticate
+            </Button>
           </div>
         </Card>
       </SplitLayout>

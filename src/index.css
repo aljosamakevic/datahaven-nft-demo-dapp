@@ -44,6 +44,7 @@ body {
 /* NFT grid: 4 columns when full width (code panel hidden) */
 .nft-grid {
   grid-template-columns: repeat(1, 1fr);
+  align-items: start;
 }
 @media (min-width: 768px) {
   .nft-grid {

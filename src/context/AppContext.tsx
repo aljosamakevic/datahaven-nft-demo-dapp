@@ -26,6 +26,7 @@ export interface AppContextType extends AppState {
   disconnect: () => void;
   connectMsp: () => Promise<void>;
   authenticateUser: () => Promise<void>;
+  connectAndAuthenticate: () => Promise<void>;
   getMspHealthStatus: () => Promise<HealthStatus>;
   handleAuthError: (error: unknown) => boolean;
   isLoading: boolean;
@@ -131,6 +132,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // One-click connect: wallet → MSP → SIWE auth
+  const connectAndAuthenticate = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      // 1. Connect wallet
+      if (!wasmInitialized) {
+        await initWasm();
+        wasmInitialized = true;
+      }
+      const addr = await connectWalletService();
+      await initPolkadotApi();
+
+      setState((prev) => ({ ...prev, isWalletConnected: true, address: addr }));
+
+      // 2. Connect to MSP
+      await connectToMsp();
+      const info: InfoResponse = await getMspInfo();
+
+      setState((prev) => ({ ...prev, isMspConnected: true, mspInfo: info }));
+
+      // 3. Authenticate via SIWE
+      const profile: UserInfo = await authUser();
+
+      setState((prev) => ({ ...prev, isAuthenticated: true, userProfile: profile }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Connection failed';
+      setError(message);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
   const getMspHealthStatus = useCallback(async (): Promise<HealthStatus> => {
     try {
       return await getMspHealth();
@@ -215,6 +249,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     disconnect,
     connectMsp,
     authenticateUser,
+    connectAndAuthenticate,
     getMspHealthStatus,
     handleAuthError,
     isLoading,

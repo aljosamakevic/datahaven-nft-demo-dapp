@@ -9,7 +9,6 @@ export {
   getPolkadotApi,
   initPolkadotApi,
   disconnectPolkadotApi,
-  buildGasTxOpts,
   isWalletConnected,
 } from './clientService';
 

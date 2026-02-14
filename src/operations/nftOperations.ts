@@ -3,11 +3,10 @@ import {
   getPublicClient,
   getWalletClient,
   getConnectedAddress,
-  buildGasTxOpts,
 } from '../services/clientService';
 import { chain } from '../services/clientService';
 import { NFT_CONTRACT_ADDRESS, NFT_CONTRACT_ABI } from '../config/nftContract';
-import { getDownloadUrl } from './storageOperations';
+import { getDownloadUrl, deleteNftFiles } from './storageOperations';
 import type { NFTMetadata, MintedNFT } from '../types';
 
 // Mint an NFT with the given metadata URI (DataHaven file key)
@@ -20,8 +19,6 @@ export async function mintNFT(metadataFileKey: string): Promise<{ tokenId: numbe
     throw new Error('Wallet not connected');
   }
 
-  const gasTxOpts = await buildGasTxOpts();
-
   const txHash = await walletClient.writeContract({
     address: NFT_CONTRACT_ADDRESS,
     abi: NFT_CONTRACT_ABI,
@@ -29,9 +26,6 @@ export async function mintNFT(metadataFileKey: string): Promise<{ tokenId: numbe
     args: [metadataFileKey],
     chain,
     account: address as `0x${string}`,
-    gas: gasTxOpts.gas,
-    maxFeePerGas: gasTxOpts.maxFeePerGas,
-    maxPriorityFeePerGas: gasTxOpts.maxPriorityFeePerGas,
   });
 
   const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
@@ -75,8 +69,6 @@ export async function updateTokenURI(tokenId: number, newMetadataFileKey: string
     throw new Error('Wallet not connected');
   }
 
-  const gasTxOpts = await buildGasTxOpts();
-
   const txHash = await walletClient.writeContract({
     address: NFT_CONTRACT_ADDRESS,
     abi: NFT_CONTRACT_ABI,
@@ -84,9 +76,6 @@ export async function updateTokenURI(tokenId: number, newMetadataFileKey: string
     args: [BigInt(tokenId), newMetadataFileKey],
     chain,
     account: address as `0x${string}`,
-    gas: gasTxOpts.gas,
-    maxFeePerGas: gasTxOpts.maxFeePerGas,
-    maxPriorityFeePerGas: gasTxOpts.maxPriorityFeePerGas,
   });
 
   const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
@@ -98,8 +87,13 @@ export async function updateTokenURI(tokenId: number, newMetadataFileKey: string
   return txHash;
 }
 
-// Burn an NFT
-export async function burnNFT(tokenId: number): Promise<string> {
+// Burn an NFT and delete its files from DataHaven
+export async function burnNFT(
+  tokenId: number,
+  ownerAddress: string,
+  metadataFileKey: string,
+  imageFileKey: string | null
+): Promise<string> {
   const walletClient = getWalletClient();
   const publicClient = getPublicClient();
   const address = getConnectedAddress();
@@ -108,8 +102,6 @@ export async function burnNFT(tokenId: number): Promise<string> {
     throw new Error('Wallet not connected');
   }
 
-  const gasTxOpts = await buildGasTxOpts();
-
   const txHash = await walletClient.writeContract({
     address: NFT_CONTRACT_ADDRESS,
     abi: NFT_CONTRACT_ABI,
@@ -117,15 +109,19 @@ export async function burnNFT(tokenId: number): Promise<string> {
     args: [BigInt(tokenId)],
     chain,
     account: address as `0x${string}`,
-    gas: gasTxOpts.gas,
-    maxFeePerGas: gasTxOpts.maxFeePerGas,
-    maxPriorityFeePerGas: gasTxOpts.maxPriorityFeePerGas,
   });
 
   const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
 
   if (receipt.status !== 'success') {
     throw new Error(`Burn transaction failed: ${txHash}`);
+  }
+
+  // After successful burn, delete files from DataHaven (best-effort)
+  try {
+    await deleteNftFiles(ownerAddress, metadataFileKey, imageFileKey);
+  } catch (err) {
+    console.warn('NFT burned but file deletion failed:', err);
   }
 
   return txHash;

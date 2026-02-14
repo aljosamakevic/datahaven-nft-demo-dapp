@@ -1,7 +1,6 @@
 import { defineChain, createPublicClient, createWalletClient, http, custom } from 'viem';
 import type { Chain, EIP1193Provider } from 'viem';
 import { StorageHubClient } from '@storagehub-sdk/core';
-import type { EvmWriteOptions } from '@storagehub-sdk/core';
 import { ApiPromise, WsProvider } from '@polkadot/api';
 import { types } from '@storagehub/types-bundle';
 import { NETWORK } from '../config/networks';
@@ -246,20 +245,4 @@ export async function disconnectPolkadotApi() {
   }
 }
 
-// Build gas transaction options based on current network conditions
-export async function buildGasTxOpts(): Promise<EvmWriteOptions> {
-  const publicClient = getPublicClient();
-  const gas = BigInt('1500000');
 
-  // EIP-1559 fees based on latest block
-  const latestBlock = await publicClient.getBlock({ blockTag: 'latest' });
-  const baseFeePerGas = latestBlock.baseFeePerGas;
-  if (baseFeePerGas == null) {
-    throw new Error('RPC did not return baseFeePerGas for the latest block. Cannot build EIP-1559 fees.');
-  }
-
-  const maxPriorityFeePerGas = BigInt('1500000000'); // 1.5 gwei
-  const maxFeePerGas = baseFeePerGas * BigInt(2) + maxPriorityFeePerGas;
-
-  return { gas, maxFeePerGas, maxPriorityFeePerGas };
-}

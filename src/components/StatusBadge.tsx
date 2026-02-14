@@ -2,9 +2,10 @@ interface StatusBadgeProps {
   status: 'healthy' | 'unhealthy' | 'connected' | 'disconnected'
     | 'inProgress' | 'ready' | 'expired' | 'revoked' | 'rejected' | 'deletionInProgress';
   label?: string;
+  className?: string;
 }
 
-export function StatusBadge({ status, label }: StatusBadgeProps) {
+export function StatusBadge({ status, label, className }: StatusBadgeProps) {
   const colors: Record<string, string> = {
     healthy: 'bg-green-500/20 text-green-400 border-green-500/30',
     connected: 'bg-green-500/20 text-green-400 border-green-500/30',
@@ -40,7 +41,7 @@ export function StatusBadge({ status, label }: StatusBadgeProps) {
 
   return (
     <span
-      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${colors[status]}`}
+      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${colors[status]}${className ? ' ' + className : ''}`}
     >
       <span
         className={`w-1.5 h-1.5 rounded-full mr-1.5 ${dotColors[status]}`}

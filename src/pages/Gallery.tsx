@@ -6,7 +6,17 @@ import { SplitLayout } from '../components/SplitLayout';
 import { StatusBadge } from '../components/StatusBadge';
 import { gallerySnippets } from '../config/codeSnippets';
 import { fetchAllNFTs, burnNFT, updateTokenURI } from '../operations/nftOperations';
-import { checkFileStatus, extractFileKeyFromUrl, deriveBucketIdForAddress } from '../operations/storageOperations';
+import {
+  checkFileStatus,
+  extractFileKeyFromUrl,
+  deriveBucketIdForAddress,
+  deleteNftFiles,
+  ensureNftBucket,
+  uploadFileToDH,
+  waitForMSPConfirmOnChain,
+  getDownloadUrl,
+} from '../operations/storageOperations';
+import { isWalletConnected } from '../services/clientService';
 import type { MintedNFT, FileStatus } from '../types';
 
 interface NftFileStatuses {
@@ -24,9 +34,18 @@ export function Gallery() {
   const [showMyOnly, setShowMyOnly] = useState(false);
   const [burningTokenId, setBurningTokenId] = useState<number | null>(null);
   const [updatingTokenId, setUpdatingTokenId] = useState<number | null>(null);
+  const [deletingTokenId, setDeletingTokenId] = useState<number | null>(null);
   const [activeSnippet, setActiveSnippet] = useState('fetchNfts');
   const [expandedTokenId, setExpandedTokenId] = useState<number | null>(null);
   const [fileStatuses, setFileStatuses] = useState<Record<number, NftFileStatuses>>({});
+
+  // Update Token URI inline form state
+  const [editingTokenId, setEditingTokenId] = useState<number | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editFile, setEditFile] = useState<File | null>(null);
+  const [editPreview, setEditPreview] = useState<string | null>(null);
+  const [updateProgress, setUpdateProgress] = useState('');
 
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -64,6 +83,9 @@ export function Gallery() {
     if (!nft) return;
 
     const pollStatuses = async () => {
+      // Skip polling if wallet/StorageHub client isn't ready yet
+      if (!isWalletConnected()) return;
+
       try {
         const bucketId = await deriveBucketIdForAddress(nft.owner);
 
@@ -111,17 +133,22 @@ export function Gallery() {
     };
   }, [expandedTokenId, nfts]);
 
-  const handleBurn = async (tokenId: number) => {
-    if (!confirm(`Are you sure you want to burn NFT #${tokenId}? This cannot be undone.`)) {
+  const handleBurn = async (nft: MintedNFT) => {
+    if (
+      !confirm(
+        `Are you sure you want to burn NFT #${nft.tokenId}? This will also delete files from DataHaven. This cannot be undone.`
+      )
+    ) {
       return;
     }
 
-    setBurningTokenId(tokenId);
+    setBurningTokenId(nft.tokenId);
     setActiveSnippet('burnNft');
     try {
-      await burnNFT(tokenId);
-      setNfts((prev) => prev.filter((nft) => nft.tokenId !== tokenId));
-      if (expandedTokenId === tokenId) {
+      const imageFileKey = nft.metadata?.image ? extractFileKeyFromUrl(nft.metadata.image) : null;
+      await burnNFT(nft.tokenId, nft.owner, nft.tokenURI, imageFileKey);
+      setNfts((prev) => prev.filter((n) => n.tokenId !== nft.tokenId));
+      if (expandedTokenId === nft.tokenId) {
         setExpandedTokenId(null);
       }
     } catch (err) {
@@ -133,20 +160,112 @@ export function Gallery() {
     }
   };
 
-  const handleUpdateURI = async (tokenId: number) => {
-    const newKey = window.prompt('Enter new metadata file key:');
-    if (!newKey) return;
+  const handleDeleteFiles = async (nft: MintedNFT) => {
+    if (!confirm(`Delete DataHaven files for NFT #${nft.tokenId}? The NFT token will remain on-chain.`)) return;
 
-    setUpdatingTokenId(tokenId);
-    setActiveSnippet('updateUri');
+    setDeletingTokenId(nft.tokenId);
+    setActiveSnippet('deleteFiles');
     try {
-      await updateTokenURI(tokenId, newKey);
-      // Reload NFTs to reflect the change
+      const imageFileKey = nft.metadata?.image ? extractFileKeyFromUrl(nft.metadata.image) : null;
+      await deleteNftFiles(nft.owner, nft.tokenURI, imageFileKey);
+      // Clear cached file statuses so they re-poll
+      setFileStatuses((prev) => {
+        const copy = { ...prev };
+        delete copy[nft.tokenId];
+        return copy;
+      });
+      // Reload NFTs to reflect deleted state (metadata/image will be null)
       await loadNFTs();
     } catch (err) {
       if (handleAuthError(err)) return;
-      const message = err instanceof Error ? err.message : 'Failed to update token URI';
-      setError(message);
+      setError(err instanceof Error ? err.message : 'Failed to delete files');
+    } finally {
+      setDeletingTokenId(null);
+    }
+  };
+
+  const startEditing = (nft: MintedNFT) => {
+    setEditingTokenId(nft.tokenId);
+    setEditName(nft.metadata?.name || '');
+    setEditDescription(nft.metadata?.description || '');
+    setEditFile(null);
+    setEditPreview(null);
+    setUpdateProgress('');
+    setActiveSnippet('updateNftFiles');
+  };
+
+  const cancelEditing = () => {
+    setEditingTokenId(null);
+    setEditName('');
+    setEditDescription('');
+    setEditFile(null);
+    if (editPreview) URL.revokeObjectURL(editPreview);
+    setEditPreview(null);
+    setUpdateProgress('');
+  };
+
+  const handleEditFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] ?? null;
+    setEditFile(file);
+    if (editPreview) URL.revokeObjectURL(editPreview);
+    setEditPreview(file ? URL.createObjectURL(file) : null);
+  };
+
+  const handleUpdateSubmit = async (nft: MintedNFT) => {
+    if (!editFile) {
+      setError('Please select an image file');
+      return;
+    }
+    if (!editName.trim()) {
+      setError('Please enter a name');
+      return;
+    }
+    if (!address) return;
+
+    setUpdatingTokenId(nft.tokenId);
+    setActiveSnippet('updateNftFiles');
+    try {
+      // 1. Ensure bucket
+      setUpdateProgress('Ensuring bucket...');
+      const bucketId = await ensureNftBucket(address);
+
+      // 2. Upload new image
+      setUpdateProgress('Uploading image...');
+      const imageBytes = new Uint8Array(await editFile.arrayBuffer());
+      const imageName = `nft-${nft.tokenId}-image-${Date.now()}.${editFile.name.split('.').pop()}`;
+      const imageFileKey = await uploadFileToDH(bucketId, imageName, imageBytes, imageBytes.length);
+
+      // 3. Wait for image confirmation
+      setUpdateProgress('Waiting for image confirmation...');
+      await waitForMSPConfirmOnChain(imageFileKey);
+
+      // 4. Build and upload new metadata
+      setUpdateProgress('Uploading metadata...');
+      const metadata = {
+        name: editName.trim(),
+        description: editDescription.trim(),
+        image: getDownloadUrl(imageFileKey),
+      };
+      const metadataBytes = new TextEncoder().encode(JSON.stringify(metadata));
+      const metadataName = `nft-${nft.tokenId}-metadata-${Date.now()}.json`;
+      const metadataFileKey = await uploadFileToDH(bucketId, metadataName, metadataBytes, metadataBytes.length);
+
+      // 5. Wait for metadata confirmation
+      setUpdateProgress('Waiting for metadata confirmation...');
+      await waitForMSPConfirmOnChain(metadataFileKey);
+
+      // 6. Update token URI on-chain
+      setUpdateProgress('Updating token URI on-chain...');
+      await updateTokenURI(nft.tokenId, metadataFileKey);
+
+      // 7. Done — reload
+      setUpdateProgress('');
+      cancelEditing();
+      await loadNFTs();
+    } catch (err) {
+      if (handleAuthError(err)) return;
+      setError(err instanceof Error ? err.message : 'Failed to update NFT');
+      setUpdateProgress('');
     } finally {
       setUpdatingTokenId(null);
     }
@@ -423,31 +542,107 @@ export function Gallery() {
                       </div>
 
                       {/* Owner Actions */}
-                      {isOwner && (
-                        <div className="space-y-2">
-                          <h4 className="text-xs font-medium text-dh-300 uppercase tracking-wider">Actions</h4>
-                          <div className="flex space-x-2">
-                            <Button
-                              onClick={() => handleUpdateURI(nft.tokenId)}
-                              variant="secondary"
-                              size="sm"
-                              isLoading={updatingTokenId === nft.tokenId}
-                              className="flex-1"
-                            >
-                              Update Token URI
-                            </Button>
-                            <Button
-                              onClick={() => handleBurn(nft.tokenId)}
-                              variant="danger"
-                              size="sm"
-                              isLoading={burningTokenId === nft.tokenId}
-                              className="flex-1"
-                            >
-                              Burn
-                            </Button>
+                      {isOwner &&
+                        (editingTokenId === nft.tokenId ? (
+                          <div className="space-y-3">
+                            <h4 className="text-xs font-medium text-dh-300 uppercase tracking-wider">Update NFT</h4>
+                            <div>
+                              <label className="block text-xs text-dh-400 mb-1">Name</label>
+                              <input
+                                type="text"
+                                value={editName}
+                                onChange={(e) => setEditName(e.target.value)}
+                                className="w-full bg-dh-900 border border-dh-600 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-sage-500"
+                                placeholder="NFT Name"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs text-dh-400 mb-1">Description</label>
+                              <textarea
+                                value={editDescription}
+                                onChange={(e) => setEditDescription(e.target.value)}
+                                rows={2}
+                                className="w-full bg-dh-900 border border-dh-600 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-sage-500 resize-none"
+                                placeholder="Description"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs text-dh-400 mb-1">New Image</label>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                onChange={handleEditFileChange}
+                                className="w-full text-xs text-dh-300 file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-dh-700 file:text-dh-200 hover:file:bg-dh-600"
+                              />
+                              {editPreview && (
+                                <img
+                                  src={editPreview}
+                                  alt="Preview"
+                                  className="mt-2 w-full h-32 object-cover rounded-lg"
+                                />
+                              )}
+                            </div>
+                            {updateProgress && <p className="text-xs text-sage-400">{updateProgress}</p>}
+                            <div className="flex space-x-2">
+                              <Button
+                                onClick={cancelEditing}
+                                variant="secondary"
+                                size="sm"
+                                className="flex-1"
+                                disabled={updatingTokenId === nft.tokenId}
+                              >
+                                Cancel
+                              </Button>
+                              <Button
+                                onClick={() => handleUpdateSubmit(nft)}
+                                variant="primary"
+                                size="sm"
+                                isLoading={updatingTokenId === nft.tokenId}
+                                className="flex-1"
+                              >
+                                Upload & Update
+                              </Button>
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        ) : (
+                          <div className="space-y-2">
+                            <h4 className="text-xs font-medium text-dh-300 uppercase tracking-wider">Actions</h4>
+                            <div className="flex flex-col space-y-2">
+                              <Button
+                                onClick={() => startEditing(nft)}
+                                variant="secondary"
+                                size="sm"
+                                className="flex-1"
+                              >
+                                Update NFT Files
+                              </Button>
+                              <Button
+                                onClick={() => handleDeleteFiles(nft)}
+                                variant="secondary"
+                                size="sm"
+                                isLoading={deletingTokenId === nft.tokenId}
+                                disabled={
+                                  !!statuses &&
+                                  !statuses.error &&
+                                  (statuses.metadata === null || statuses.metadata === 'deletionInProgress') &&
+                                  (statuses.image === null || statuses.image === 'deletionInProgress')
+                                }
+                                className="flex-1"
+                              >
+                                Delete NFT Files
+                              </Button>
+                              <Button
+                                onClick={() => handleBurn(nft)}
+                                variant="danger"
+                                size="sm"
+                                isLoading={burningTokenId === nft.tokenId}
+                                className="flex-1"
+                              >
+                                Burn NFT
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
                     </div>
                   )}
                 </div>

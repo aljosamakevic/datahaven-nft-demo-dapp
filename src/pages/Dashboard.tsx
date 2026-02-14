@@ -15,9 +15,7 @@ export function Dashboard() {
     address,
     mspInfo,
     userProfile,
-    connectWallet,
-    connectMsp,
-    authenticateUser,
+    connectAndAuthenticate,
     getMspHealthStatus,
     disconnect,
     isLoading,
@@ -27,7 +25,7 @@ export function Dashboard() {
 
   const [healthStatus, setHealthStatus] = useState<HealthStatus | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
-  const [activeSnippet, setActiveSnippet] = useState('connectWallet');
+  const [activeSnippet, setActiveSnippet] = useState('connectFlow');
 
   // Auto-check health when MSP is connected
   useEffect(() => {
@@ -50,10 +48,12 @@ export function Dashboard() {
 
   const truncateHash = (hash: string) => `${hash.slice(0, 10)}...${hash.slice(-8)}`;
 
+  const isFullyConnected = isWalletConnected && isMspConnected && isAuthenticated;
+
   return (
     <SplitLayout
       snippets={dashboardSnippets}
-      defaultSnippetId="connectWallet"
+      defaultSnippetId="connectFlow"
       pageTitle="Dashboard"
       pageDescription="Connect your wallet, storage provider, and authenticate to get started."
       activeSnippetId={activeSnippet}
@@ -84,16 +84,36 @@ export function Dashboard() {
         </div>
       )}
 
-      {/* Connection Steps */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Step 1: Connect Wallet */}
-        <Card title="1. Connect Wallet" onClick={() => setActiveSnippet('connectWallet')}>
+      {/* Disconnected State: Single connect card */}
+      {!isFullyConnected && (
+        <Card title="Connect & Authenticate">
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-dh-300">Status</span>
-              <StatusBadge status={isWalletConnected ? 'connected' : 'disconnected'} />
-            </div>
+            <p className="text-sm text-dh-300">
+              One click connects your wallet, storage provider, and authenticates you via SIWE.
+              You'll be prompted to approve two wallet signatures:
+            </p>
+            <ol className="text-sm text-dh-300 space-y-2 list-decimal list-inside">
+              <li>
+                <span className="text-dh-200 font-medium">Connect Wallet</span> — grants account access
+                {isWalletConnected && (
+                  <StatusBadge status="connected" className="ml-2 inline-flex" />
+                )}
+              </li>
+              <li>
+                <span className="text-dh-200 font-medium">Connect to Storage Provider</span> — establishes MSP connection
+                {isMspConnected && (
+                  <StatusBadge status="connected" className="ml-2 inline-flex" />
+                )}
+              </li>
+              <li>
+                <span className="text-dh-200 font-medium">Authenticate (SIWE)</span> — signs a message to prove identity
+                {isAuthenticated && (
+                  <StatusBadge status="connected" label="Authenticated" className="ml-2 inline-flex" />
+                )}
+              </li>
+            </ol>
 
+            {/* Show partial state if some steps succeeded */}
             {isWalletConnected && address && (
               <div className="bg-dh-900 rounded-lg p-3">
                 <p className="text-xs text-dh-400 mb-1">Connected Address</p>
@@ -102,108 +122,126 @@ export function Dashboard() {
             )}
 
             <Button
-              onClick={isWalletConnected ? disconnect : connectWallet}
+              onClick={connectAndAuthenticate}
               isLoading={isLoading}
-              variant={isWalletConnected ? 'secondary' : 'primary'}
               className="w-full"
             >
-              {isWalletConnected ? 'Disconnect' : 'Connect Wallet'}
+              {isWalletConnected && !isMspConnected
+                ? 'Continue Connection...'
+                : isMspConnected && !isAuthenticated
+                  ? 'Authenticate (SIWE)'
+                  : 'Connect & Authenticate'}
             </Button>
+
+            {isWalletConnected && (
+              <Button onClick={disconnect} variant="secondary" className="w-full">
+                Disconnect
+              </Button>
+            )}
           </div>
         </Card>
+      )}
 
-        {/* Step 2: Connect to MSP */}
-        <Card title="2. Connect to Storage Provider" onClick={() => setActiveSnippet('connectToMsp')}>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-dh-300">Status</span>
-              <StatusBadge status={isMspConnected ? 'connected' : 'disconnected'} />
-            </div>
-
-            {healthStatus && (
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-dh-300">Health</span>
-                <StatusBadge
-                  status={healthStatus.status === 'healthy' ? 'healthy' : 'unhealthy'}
-                  label={healthStatus.status}
-                />
-              </div>
-            )}
-
-            {mspInfo && (
-              <div className="bg-dh-900 rounded-lg p-3 space-y-2">
-                <div>
-                  <p className="text-xs text-dh-400">MSP ID</p>
-                  <p className="text-sm font-mono text-dh-200">{truncateHash(mspInfo.mspId)}</p>
+      {/* Connected State: Status summary */}
+      {isFullyConnected && (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* Wallet Status */}
+            <Card title="Wallet">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-dh-300">Status</span>
+                  <StatusBadge status="connected" />
                 </div>
-                {mspInfo.version && (
-                  <div>
-                    <p className="text-xs text-dh-400">Version</p>
-                    <p className="text-sm text-dh-200">{mspInfo.version}</p>
+                {address && (
+                  <div className="bg-dh-900 rounded-lg p-3">
+                    <p className="text-xs text-dh-400 mb-1">Address</p>
+                    <p className="text-sm font-mono text-dh-200 break-all">{address}</p>
                   </div>
                 )}
               </div>
-            )}
+            </Card>
 
-            <Button
-              onClick={connectMsp}
-              isLoading={isLoading || healthLoading}
-              disabled={!isWalletConnected || isMspConnected}
-              className="w-full"
-            >
-              {isMspConnected ? 'Connected' : 'Connect to MSP'}
-            </Button>
-          </div>
-        </Card>
-
-        {/* Step 3: Authenticate */}
-        <Card title="3. Authenticate with Storage Provider" onClick={() => setActiveSnippet('authenticateUser')}>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-dh-300">Status</span>
-              <StatusBadge
-                status={isAuthenticated ? 'connected' : 'disconnected'}
-                label={isAuthenticated ? 'Authenticated' : 'Not Authenticated'}
-              />
-            </div>
-
-            {userProfile && (
-              <div className="bg-dh-900 rounded-lg p-3">
-                <p className="text-xs text-dh-400 mb-1">User Address</p>
-                <p className="text-sm font-mono text-dh-200 break-all">{userProfile.address}</p>
+            {/* MSP Status */}
+            <Card title="Storage Provider">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-dh-300">Status</span>
+                  <StatusBadge status="connected" />
+                </div>
+                {healthStatus && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-dh-300">Health</span>
+                    <StatusBadge
+                      status={healthStatus.status === 'healthy' ? 'healthy' : 'unhealthy'}
+                      label={healthStatus.status}
+                    />
+                  </div>
+                )}
+                {mspInfo && (
+                  <div className="bg-dh-900 rounded-lg p-3 space-y-2">
+                    <div>
+                      <p className="text-xs text-dh-400">MSP ID</p>
+                      <p className="text-sm font-mono text-dh-200">{truncateHash(mspInfo.mspId)}</p>
+                    </div>
+                    {mspInfo.version && (
+                      <div>
+                        <p className="text-xs text-dh-400">Version</p>
+                        <p className="text-sm text-dh-200">{mspInfo.version}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <Button
+                  onClick={checkHealth}
+                  variant="secondary"
+                  size="sm"
+                  isLoading={healthLoading}
+                  className="w-full"
+                >
+                  Check Health
+                </Button>
               </div>
-            )}
+            </Card>
 
-            <p className="text-xs text-dh-400">
-              Sign a message with your wallet to authenticate with the storage provider (SIWE).
-            </p>
-
-            <Button
-              onClick={authenticateUser}
-              isLoading={isLoading}
-              disabled={!isMspConnected || isAuthenticated}
-              className="w-full"
-            >
-              {isAuthenticated ? 'Authenticated' : 'Authenticate (SIWE)'}
-            </Button>
+            {/* Auth Status */}
+            <Card title="Authentication">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-dh-300">Status</span>
+                  <StatusBadge status="connected" label="Authenticated" />
+                </div>
+                {userProfile && (
+                  <div className="bg-dh-900 rounded-lg p-3">
+                    <p className="text-xs text-dh-400 mb-1">User Address</p>
+                    <p className="text-sm font-mono text-dh-200 break-all">{userProfile.address}</p>
+                  </div>
+                )}
+                <p className="text-xs text-dh-400">
+                  Signed in via SIWE (Sign-In With Ethereum).
+                </p>
+              </div>
+            </Card>
           </div>
-        </Card>
-      </div>
 
-      {/* Next Steps */}
-      {isAuthenticated && (
-        <Card title="Next Steps">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <a href="/mint" className="block p-4 bg-dh-900 rounded-lg hover:bg-dh-700 transition-colors">
-              <h4 className="font-medium text-white mb-1">Mint an NFT</h4>
-              <p className="text-sm text-dh-300">Upload an image to DataHaven and mint it as an NFT on-chain.</p>
-            </a>
-            <a href="/gallery" className="block p-4 bg-dh-900 rounded-lg hover:bg-dh-700 transition-colors">
-              <h4 className="font-medium text-white mb-1">Browse Gallery</h4>
-              <p className="text-sm text-dh-300">View all minted NFTs with images stored on DataHaven.</p>
-            </a>
-          </div>
-        </Card>
+          <Button onClick={disconnect} variant="secondary" className="w-full">
+            Disconnect
+          </Button>
+
+          {/* Next Steps */}
+          <Card title="Next Steps">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <a href="/mint" className="block p-4 bg-dh-900 rounded-lg hover:bg-dh-700 transition-colors">
+                <h4 className="font-medium text-white mb-1">Mint an NFT</h4>
+                <p className="text-sm text-dh-300">Upload an image to DataHaven and mint it as an NFT on-chain.</p>
+              </a>
+              <a href="/gallery" className="block p-4 bg-dh-900 rounded-lg hover:bg-dh-700 transition-colors">
+                <h4 className="font-medium text-white mb-1">Browse Gallery</h4>
+                <p className="text-sm text-dh-300">View all minted NFTs with images stored on DataHaven.</p>
+              </a>
+            </div>
+          </Card>
+        </>
       )}
     </SplitLayout>
   );

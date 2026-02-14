@@ -8,6 +8,8 @@ export {
   getNftBucketName,
   extractFileKeyFromUrl,
   deriveBucketIdForAddress,
+  requestDeleteFile,
+  deleteNftFiles,
 } from './storageOperations';
 
 export {

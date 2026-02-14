@@ -2,14 +2,15 @@ import '@storagehub/api-augment';
 import { FileManager, ReplicationLevel } from '@storagehub-sdk/core';
 import { TypeRegistry } from '@polkadot/types';
 import type { AccountId20, H256 } from '@polkadot/types/interfaces';
+import { getStorageHubClient, getConnectedAddress, getPublicClient, getPolkadotApi } from '../services/clientService';
 import {
-  getStorageHubClient,
-  getConnectedAddress,
-  getPublicClient,
-  getPolkadotApi,
-  buildGasTxOpts,
-} from '../services/clientService';
-import { getMspClient, connectToMsp, getMspInfo, getValueProps, authenticateUser, isAuthenticated } from '../services/mspService';
+  getMspClient,
+  connectToMsp,
+  getMspInfo,
+  getValueProps,
+  authenticateUser,
+  isAuthenticated,
+} from '../services/mspService';
 import { NETWORK } from '../config/networks';
 import type { PalletFileSystemStorageRequestMetadata } from '@polkadot/types/lookup';
 import type { FileStatus } from '../types';
@@ -51,14 +52,12 @@ export async function ensureNftBucket(address: string): Promise<string> {
   // Create the bucket
   const { mspId } = await getMspInfo();
   const valuePropId = await getValueProps();
-  const gasTxOpts = await buildGasTxOpts();
 
   const txHash: `0x${string}` | undefined = await storageHubClient.createBucket(
     mspId as `0x${string}`,
     bucketName,
     false, // public bucket so images are accessible
-    valuePropId,
-    gasTxOpts
+    valuePropId
   );
 
   if (!txHash) {
@@ -159,7 +158,6 @@ export async function uploadFileToDH(
   }
 
   // Issue storage request on-chain
-  const gasTxOpts = await buildGasTxOpts();
   const txHash: `0x${string}` | undefined = await storageHubClient.issueStorageRequest(
     bucketId as `0x${string}`,
     fileName,
@@ -168,8 +166,7 @@ export async function uploadFileToDH(
     mspId as `0x${string}`,
     peerIds,
     ReplicationLevel.Custom,
-    1,
-    gasTxOpts
+    1
   );
 
   if (!txHash) {
@@ -321,6 +318,38 @@ export function extractFileKeyFromUrl(url: string): string {
     throw new Error(`Invalid download URL: ${url}`);
   }
   return parts[1];
+}
+
+// Request deletion of a single file from DataHaven
+export async function requestDeleteFile(bucketId: string, fileKey: string): Promise<void> {
+  const mspClient = await connectToMsp();
+  const storageHubClient = getStorageHubClient();
+  const publicClient = getPublicClient();
+
+  if (!isAuthenticated()) {
+    await authenticateUser();
+  }
+
+  const fileInfo = await mspClient.files.getFileInfo(bucketId, fileKey);
+  const txHash = await storageHubClient.requestDeleteFile(fileInfo);
+  const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+
+  if (receipt.status !== 'success') {
+    throw new Error(`File deletion failed: ${txHash}`);
+  }
+}
+
+// Delete both NFT files (metadata + image) from DataHaven
+export async function deleteNftFiles(
+  ownerAddress: string,
+  metadataFileKey: string,
+  imageFileKey: string | null
+): Promise<void> {
+  const bucketId = await deriveBucketIdForAddress(ownerAddress);
+  await requestDeleteFile(bucketId, metadataFileKey);
+  if (imageFileKey) {
+    await requestDeleteFile(bucketId, imageFileKey);
+  }
 }
 
 // Derive the NFT bucket ID for a given owner address

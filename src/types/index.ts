@@ -36,11 +36,6 @@ export interface MintedNFT {
   imageUrl: string | null; // Public download URL, null if unavailable
 }
 
-export interface MintProgress {
-  step: 'idle' | 'ensuring-bucket' | 'uploading-image' | 'uploading-metadata' | 'minting' | 'done' | 'error';
-  message: string;
-}
-
 // FileStatus derived from SDK's StorageFileInfo — not barrel-exported by the SDK directly
 export type FileStatus = StorageFileInfo['status'];
 // Resolves to: "inProgress" | "ready" | "expired" | "revoked" | "rejected" | "deletionInProgress"

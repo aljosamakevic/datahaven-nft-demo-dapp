@@ -13,7 +13,7 @@ export function Layout({ children }: LayoutProps) {
 
   const navItems = [
     { path: '/', label: 'Dashboard' },
-    { path: '/mint', label: 'Mint NFT' },
+    { path: '/mint', label: 'Mint Mortal NFT' },
     { path: '/gallery', label: 'Gallery' },
   ];
 

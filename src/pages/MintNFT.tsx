@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useAppState } from '../hooks/useAppState';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
+import { StatusBadge } from '../components/StatusBadge';
 import { ProgressStepper } from '../components/ProgressStepper';
 import { SplitLayout } from '../components/SplitLayout';
 import { mintSnippets } from '../config/codeSnippets';
@@ -11,8 +12,12 @@ import {
   waitForMSPConfirmOnChain,
   getDownloadUrl,
   checkFileStatus,
+  deriveBucketIdForAddress,
+  getNftBucketName,
 } from '../operations/storageOperations';
 import { mintNFT } from '../operations/nftOperations';
+import { getMspInfo } from '../services/mspService';
+import { getPolkadotApi } from '../services/clientService';
 import type { MintProgress, FileConfirmation } from '../types';
 
 export function MintNFT() {
@@ -24,6 +29,13 @@ export function MintNFT() {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [activeSnippet, setActiveSnippet] = useState('ensureBucket');
 
+  // Bucket state
+  const [bucketId, setBucketId] = useState<string | null>(null);
+  const [bucketExists, setBucketExists] = useState<boolean | null>(null); // null = not checked yet
+  const [bucketLoading, setBucketLoading] = useState(false);
+  const [bucketCreating, setBucketCreating] = useState(false);
+  const [mspId, setMspId] = useState<string | null>(null);
+
   const [progress, setProgress] = useState<MintProgress>({ step: 'idle', message: '' });
   const [mintResult, setMintResult] = useState<{ tokenId: number; txHash: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -34,6 +46,62 @@ export function MintNFT() {
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const bucketName = address ? getNftBucketName(address) : null;
+
+  // Check bucket existence on mount when authenticated
+  useEffect(() => {
+    if (isAuthenticated && address) {
+      checkBucketExists();
+    }
+  }, [isAuthenticated, address]);
+
+  const checkBucketExists = async () => {
+    if (!address) return;
+    setBucketLoading(true);
+    try {
+      const id = await deriveBucketIdForAddress(address);
+      setBucketId(id);
+
+      // Check on-chain if bucket exists
+      const polkadotApi = getPolkadotApi();
+      const bucketOnChain = await polkadotApi.query.providers.buckets(id);
+      setBucketExists(!bucketOnChain.isEmpty);
+
+      // Fetch MSP ID for display
+      try {
+        const info = await getMspInfo();
+        setMspId(info.mspId);
+      } catch {
+        // Non-critical — just for display
+      }
+    } catch (err) {
+      if (handleAuthError(err)) return;
+      console.warn('Failed to check bucket:', err);
+      setBucketExists(false);
+    } finally {
+      setBucketLoading(false);
+    }
+  };
+
+  const handleCreateBucket = async () => {
+    if (!address) return;
+    setBucketCreating(true);
+    setError(null);
+    try {
+      setActiveSnippet('ensureBucket');
+      const id = await ensureNftBucket(address);
+      setBucketId(id);
+      setBucketExists(true);
+    } catch (err) {
+      if (handleAuthError(err)) return;
+      setError(err instanceof Error ? err.message : 'Failed to create bucket');
+    } finally {
+      setBucketCreating(false);
+    }
+  };
+
+  const truncateHash = (hash: string) => `${hash.slice(0, 10)}...${hash.slice(-8)}`;
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -79,8 +147,10 @@ export function MintNFT() {
       // Step 1: Ensure bucket
       setProgress({ step: 'ensuring-bucket', message: 'Creating storage bucket if needed...' });
       setActiveSnippet('ensureBucket');
-      const bucketId = await ensureNftBucket(address);
-      setMintBucketId(bucketId);
+      const mintBucket = await ensureNftBucket(address);
+      setMintBucketId(mintBucket);
+      setBucketId(mintBucket);
+      setBucketExists(true);
 
       // Step 2: Upload image + wait for MSP on-chain confirm
       setProgress({ step: 'uploading-image', message: 'Uploading image to DataHaven...' });
@@ -88,7 +158,7 @@ export function MintNFT() {
       const fileBuffer = await selectedFile.arrayBuffer();
       const fileBytes = new Uint8Array(fileBuffer);
       const imageFileKey = await uploadFileToDH(
-        bucketId,
+        mintBucket,
         `image-${Date.now()}-${selectedFile.name}`,
         fileBytes,
         selectedFile.size
@@ -108,7 +178,7 @@ export function MintNFT() {
       const encoder = new TextEncoder();
       const metadataBytes = encoder.encode(metadataJson);
       const metadataFileKey = await uploadFileToDH(
-        bucketId,
+        mintBucket,
         `metadata-${Date.now()}.json`,
         metadataBytes,
         metadataBytes.length
@@ -139,7 +209,8 @@ export function MintNFT() {
 
   // Terminal file statuses — no point polling further once reached
   const terminalStatuses = ['ready', 'expired', 'revoked', 'rejected'] as const;
-  const isTerminal = (status: string | null) => status !== null && terminalStatuses.includes(status as typeof terminalStatuses[number]);
+  const isTerminal = (status: string | null) =>
+    status !== null && terminalStatuses.includes(status as (typeof terminalStatuses)[number]);
 
   // Background polling for file confirmation status
   const pollFileStatuses = useCallback(async () => {
@@ -211,7 +282,7 @@ export function MintNFT() {
       'ensuring-bucket': 0,
       'uploading-image': 1,
       'uploading-metadata': 2,
-      'minting': 3,
+      minting: 3,
     };
 
     if (progress.step === 'idle') return steps;
@@ -219,9 +290,12 @@ export function MintNFT() {
       return steps.map((s) => ({ ...s, status: 'completed' as const }));
     }
     if (progress.step === 'error') {
-      const currentIndex = stepMap[Object.keys(stepMap).reverse().find(
-        (key) => stepMap[key] !== undefined
-      ) || ''];
+      const currentIndex =
+        stepMap[
+          Object.keys(stepMap)
+            .reverse()
+            .find((key) => stepMap[key] !== undefined) || ''
+        ];
       if (currentIndex !== undefined) {
         for (let i = 0; i < currentIndex; i++) {
           steps[i].status = 'completed';
@@ -244,21 +318,33 @@ export function MintNFT() {
 
   const getStatusBadge = (status: string | null) => {
     if (status === null) {
-      return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-500/20 text-yellow-400">Pending</span>;
+      return (
+        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-500/20 text-yellow-400">Pending</span>
+      );
     }
     switch (status) {
       case 'inProgress':
-        return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-500/20 text-blue-400">In Progress</span>;
+        return (
+          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-500/20 text-blue-400">In Progress</span>
+        );
       case 'ready':
-        return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-500/20 text-green-400">Ready</span>;
+        return (
+          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-500/20 text-green-400">Ready</span>
+        );
       case 'expired':
         return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/20 text-red-400">Expired</span>;
       case 'revoked':
         return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/20 text-red-400">Revoked</span>;
       case 'rejected':
-        return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/20 text-red-400">Rejected</span>;
+        return (
+          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/20 text-red-400">Rejected</span>
+        );
       case 'deletionInProgress':
-        return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-500/20 text-yellow-400">Deleting</span>;
+        return (
+          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-500/20 text-yellow-400">
+            Deleting
+          </span>
+        );
       default:
         return null;
     }
@@ -320,9 +406,62 @@ export function MintNFT() {
         </div>
       )}
 
+      {/* Ensure Bucket */}
+      <Card title="Ensure Storage Bucket" onClick={() => setActiveSnippet('ensureBucket')}>
+        <div className="space-y-3">
+          <p className="text-xs text-dh-400">
+            Each user gets a dedicated bucket (folder) for NFT assets on DataHaven. The bucket must exist before you can
+            upload files. Images and metadata for your NFTs will be stored here, and the bucket is linked to your
+            on-chain identity.
+          </p>
+
+          <div className="bg-dh-900 rounded-lg p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-dh-400">Bucket Name</span>
+              <span className="text-xs font-mono text-dh-200">{bucketName || '—'}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-dh-400">Bucket ID</span>
+              <span className="text-xs font-mono text-dh-200">{bucketId ? truncateHash(bucketId) : '—'}</span>
+            </div>
+            {mspId && (
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-dh-400">MSP ID</span>
+                <span className="text-xs font-mono text-dh-200">{truncateHash(mspId)}</span>
+              </div>
+            )}
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-dh-400">Visibility</span>
+              <span className="text-xs text-dh-200">Public</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-dh-400">Status</span>
+              {bucketLoading ? (
+                <span className="text-xs text-dh-500">Checking...</span>
+              ) : bucketExists === null ? (
+                <span className="text-xs text-dh-500">Not checked</span>
+              ) : (
+                <StatusBadge
+                  status={bucketExists ? 'connected' : 'disconnected'}
+                  label={bucketExists ? 'Exists' : 'Not Created'}
+                />
+              )}
+            </div>
+          </div>
+
+          {bucketExists === false && (
+            <Button onClick={handleCreateBucket} isLoading={bucketCreating} size="sm" className="w-full">
+              Create Bucket
+            </Button>
+          )}
+
+          {bucketExists && <p className="text-xs text-green-400">Bucket is ready for file uploads.</p>}
+        </div>
+      </Card>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Left: Form */}
-        <Card title="NFT Details">
+        <Card title="NFT Mint Process">
           <div className="space-y-4">
             {/* Name */}
             <div>
@@ -374,7 +513,9 @@ export function MintNFT() {
                       </svg>
                     </button>
                   )}
-                  <p className="mt-1 text-xs text-dh-400">{selectedFile?.name} ({(selectedFile?.size ?? 0 / 1024).toFixed(1)} KB)</p>
+                  <p className="mt-1 text-xs text-dh-400">
+                    {selectedFile?.name} ({(selectedFile?.size ?? 0 / 1024).toFixed(1)} KB)
+                  </p>
                 </div>
               ) : (
                 <div
@@ -383,7 +524,12 @@ export function MintNFT() {
                     isMinting ? 'opacity-50 cursor-not-allowed' : 'hover:border-sage-600 cursor-pointer'
                   } transition-colors`}
                 >
-                  <svg className="w-8 h-8 mx-auto text-dh-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg
+                    className="w-8 h-8 mx-auto text-dh-400 mb-2"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
                     <rect x="3" y="3" width="18" height="18" rx="2" ry="2" strokeWidth="2" />
                     <circle cx="8.5" cy="8.5" r="1.5" strokeWidth="2" />
                     <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M21 15l-5-5L5 21" />
@@ -392,13 +538,7 @@ export function MintNFT() {
                   <p className="text-xs text-dh-400 mt-1">PNG, JPG, GIF up to 10MB</p>
                 </div>
               )}
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                onChange={handleFileSelect}
-                className="hidden"
-              />
+              <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileSelect} className="hidden" />
             </div>
 
             {/* Mint Button */}
@@ -422,74 +562,75 @@ export function MintNFT() {
 
         {/* Right: Progress */}
         <Card title="Minting Progress">
-          {progress.step === 'idle' ? (
-            <div className="text-center py-8">
-              <p className="text-dh-400">Fill in the NFT details and click "Mint NFT" to begin.</p>
-              <p className="text-xs text-dh-500 mt-2">
-                Your image and metadata will be stored on DataHaven, and the NFT will be minted on-chain.
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <ProgressStepper steps={getSteps()} />
+          <div className="space-y-4">
+            <ProgressStepper steps={getSteps()} />
 
+            {progress.step === 'idle' ? (
+              <div className="p-3 bg-dh-900 rounded-lg">
+                <p className="text-sm text-dh-400">Fill in the NFT details and click "Mint NFT" to begin.</p>
+                <p className="text-xs text-dh-500 mt-1">
+                  Your image and metadata will be stored on DataHaven, and the NFT will be minted on-chain.
+                </p>
+              </div>
+            ) : (
               <div className="mt-4 p-3 bg-dh-900 rounded-lg">
-                <p className={`text-sm ${
-                  progress.step === 'done' ? 'text-green-400' :
-                  progress.step === 'error' ? 'text-red-400' :
-                  'text-sage-400'
-                }`}>
+                <p
+                  className={`text-sm ${
+                    progress.step === 'done'
+                      ? 'text-green-400'
+                      : progress.step === 'error'
+                        ? 'text-red-400'
+                        : 'text-sage-400'
+                  }`}
+                >
                   {progress.message}
                 </p>
               </div>
+            )}
 
-              {mintResult && (
-                <div className="mt-4 p-4 bg-green-500/10 border border-green-500/30 rounded-lg space-y-2">
-                  <p className="text-sm font-medium text-green-400">NFT Minted Successfully!</p>
-                  <div>
-                    <p className="text-xs text-dh-400">Token ID</p>
-                    <p className="text-sm font-mono text-dh-200">#{mintResult.tokenId}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-dh-400">Transaction Hash</p>
-                    <p className="text-sm font-mono text-dh-200 break-all">{mintResult.txHash}</p>
-                  </div>
-                  <a
-                    href="/gallery"
-                    className="inline-block mt-2 text-sm text-sage-400 hover:text-sage-300"
-                  >
-                    View in Gallery
-                  </a>
+            {mintResult && (
+              <div className="mt-4 p-4 bg-green-500/10 border border-green-500/30 rounded-lg space-y-2">
+                <p className="text-sm font-medium text-green-400">NFT Minted Successfully!</p>
+                <div>
+                  <p className="text-xs text-dh-400">Token ID</p>
+                  <p className="text-sm font-mono text-dh-200">#{mintResult.tokenId}</p>
                 </div>
-              )}
+                <div>
+                  <p className="text-xs text-dh-400">Transaction Hash</p>
+                  <p className="text-sm font-mono text-dh-200 break-all">{mintResult.txHash}</p>
+                </div>
+                <a href="/gallery" className="inline-block mt-2 text-sm text-sage-400 hover:text-sage-300">
+                  View in Gallery
+                </a>
+              </div>
+            )}
 
-              {/* File Confirmation Status */}
-              {fileConfirmations.length > 0 && (
-                <div className="mt-4 p-4 bg-dh-900 border border-dh-700 rounded-lg space-y-3">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium text-dh-200">File Confirmation Status</p>
-                    {fileConfirmations.every((fc) => fc.status === 'ready') && (
-                      <span className="text-xs text-green-400">All files ready</span>
-                    )}
-                  </div>
-                  {fileConfirmations.map((fc) => (
-                    <div key={fc.fileKey} className="flex items-center justify-between">
-                      <div className="flex items-center space-x-2">
-                        <span className="text-xs text-dh-300">{fc.label}</span>
-                        <span className="text-xs font-mono text-dh-500 truncate max-w-[120px]">{fc.fileKey}</span>
-                      </div>
-                      {getStatusBadge(fc.status)}
-                    </div>
-                  ))}
-                  {!fileConfirmations.every((fc) => isTerminal(fc.status)) && (
-                    <p className="text-xs text-dh-500">
-                      Files may take up to 11 minutes to become downloadable while the network confirms them.
-                    </p>
+            {/* File Confirmation Status */}
+            {fileConfirmations.length > 0 && (
+              <div className="mt-4 p-4 bg-dh-900 border border-dh-700 rounded-lg space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium text-dh-200">File Confirmation Status</p>
+                  {fileConfirmations.every((fc) => fc.status === 'ready') && (
+                    <span className="text-xs text-green-400">All files ready</span>
                   )}
                 </div>
-              )}
-            </div>
-          )}
+                {fileConfirmations.map((fc) => (
+                  <div key={fc.fileKey} className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs text-dh-300">{fc.label}</span>
+                      <span className="text-xs font-mono text-dh-500 truncate max-w-[120px]">{fc.fileKey}</span>
+                    </div>
+                    {getStatusBadge(fc.status)}
+                  </div>
+                ))}
+                {!fileConfirmations.every((fc) => isTerminal(fc.status)) && (
+                  <p className="text-xs text-dh-500">
+                    Files may take up to 11 minutes to become downloadable while the network confirms them.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
         </Card>
       </div>
     </SplitLayout>

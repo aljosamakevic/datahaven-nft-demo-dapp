@@ -153,6 +153,7 @@ export function CodePanel({ snippets, activeSnippetId, onSnippetSelect }: CodePa
           <button
             key={snippet.id}
             onClick={() => onSnippetSelect(snippet.id)}
+            title={snippet.tooltip}
             className={`px-4 py-2.5 text-sm font-medium whitespace-nowrap transition-colors border-b-2 ${
               snippet.id === activeSnippetId
                 ? 'border-sage-400 text-white bg-dh-900/50'

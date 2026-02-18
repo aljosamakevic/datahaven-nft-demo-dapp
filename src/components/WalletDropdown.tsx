@@ -17,6 +17,8 @@ export function WalletDropdown({ mobile = false }: WalletDropdownProps) {
     mspInfo,
     userProfile,
     connectAndAuthenticate,
+    connectMsp,
+    authenticateUser,
     disconnect,
     getMspHealthStatus,
     isLoading,
@@ -28,6 +30,8 @@ export function WalletDropdown({ mobile = false }: WalletDropdownProps) {
   const [healthStatus, setHealthStatus] = useState<HealthStatus | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const isFullyConnected = isWalletConnected && isMspConnected && isAuthenticated;
 
   // Click-outside-to-close (desktop only)
   useEffect(() => {
@@ -70,8 +74,6 @@ export function WalletDropdown({ mobile = false }: WalletDropdownProps) {
   const truncateAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`;
   const truncateHash = (hash: string) => `${hash.slice(0, 10)}...${hash.slice(-8)}`;
 
-  const isFullyConnected = isWalletConnected && isMspConnected && isAuthenticated;
-
   // --- Disconnected state ---
   if (!isWalletConnected) {
     return (
@@ -90,29 +92,7 @@ export function WalletDropdown({ mobile = false }: WalletDropdownProps) {
     );
   }
 
-  // --- Partially connected (wallet yes, but MSP or auth not done) ---
-  if (!isFullyConnected) {
-    return (
-      <div className={mobile ? 'px-3 py-2 space-y-2' : 'ml-4 flex items-center space-x-2'}>
-        <div className="flex items-center space-x-2">
-          <span className="w-2 h-2 rounded-full bg-yellow-400" />
-          <span className="text-sm text-dh-200 font-mono">{truncateAddress(address!)}</span>
-        </div>
-        <Button
-          onClick={connectAndAuthenticate}
-          isLoading={isLoading}
-          size="sm"
-        >
-          Continue
-        </Button>
-        {error && (
-          <p className="text-xs text-red-400 mt-1">{error}</p>
-        )}
-      </div>
-    );
-  }
-
-  // --- Fully connected state ---
+  // --- Connected state (partial or full) — dropdown panel ---
   const dropdownPanel = (
     <div className={
       mobile
@@ -150,52 +130,85 @@ export function WalletDropdown({ mobile = false }: WalletDropdownProps) {
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <span className="text-xs font-medium text-dh-300 uppercase tracking-wider">Storage Provider</span>
-          <StatusBadge status="connected" />
+          <StatusBadge status={isMspConnected ? 'connected' : 'disconnected'} />
         </div>
-        {healthStatus && (
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-dh-400">Health</span>
-            <StatusBadge
-              status={healthStatus.status === 'healthy' ? 'healthy' : 'unhealthy'}
-              label={healthStatus.status}
-            />
-          </div>
-        )}
-        {mspInfo && (
-          <div className="bg-dh-900 rounded-lg p-2 space-y-1">
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-dh-400">MSP ID</span>
-              <span className="text-xs font-mono text-dh-200">{truncateHash(mspInfo.mspId)}</span>
-            </div>
-            {mspInfo.version && (
+        {isMspConnected ? (
+          <>
+            {healthStatus && (
               <div className="flex items-center justify-between">
-                <span className="text-xs text-dh-400">Version</span>
-                <span className="text-xs text-dh-200">{mspInfo.version}</span>
+                <span className="text-xs text-dh-400">Health</span>
+                <StatusBadge
+                  status={healthStatus.status === 'healthy' ? 'healthy' : 'unhealthy'}
+                  label={healthStatus.status}
+                />
               </div>
             )}
-          </div>
+            {mspInfo && (
+              <div className="bg-dh-900 rounded-lg p-2 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-dh-400">MSP ID</span>
+                  <span className="text-xs font-mono text-dh-200">{truncateHash(mspInfo.mspId)}</span>
+                </div>
+                {mspInfo.version && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-dh-400">Version</span>
+                    <span className="text-xs text-dh-200">{mspInfo.version}</span>
+                  </div>
+                )}
+              </div>
+            )}
+            <Button
+              onClick={checkHealth}
+              variant="secondary"
+              size="sm"
+              isLoading={healthLoading}
+              className="w-full"
+            >
+              Check Health
+            </Button>
+          </>
+        ) : (
+          <Button
+            onClick={connectMsp}
+            isLoading={isLoading}
+            size="sm"
+            className="w-full"
+          >
+            Connect to MSP
+          </Button>
         )}
-        <Button
-          onClick={checkHealth}
-          variant="secondary"
-          size="sm"
-          isLoading={healthLoading}
-          className="w-full"
-        >
-          Check Health
-        </Button>
       </div>
 
       {/* Authentication */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <span className="text-xs font-medium text-dh-300 uppercase tracking-wider">Authentication</span>
-          <StatusBadge status="connected" label="Authenticated" />
+          <StatusBadge
+            status={isAuthenticated ? 'connected' : 'disconnected'}
+            label={isAuthenticated ? 'Authenticated' : 'Not Authenticated'}
+          />
         </div>
-        {userProfile && (
-          <p className="text-xs text-dh-400">
-            Signed in via SIWE
-          </p>
+        {isAuthenticated ? (
+          userProfile && (
+            <p className="text-xs text-dh-400">
+              Signed in via SIWE
+            </p>
+          )
+        ) : (
+          <>
+            <p className="text-xs text-dh-400">
+              Sign a message with your wallet to authenticate with the storage provider (SIWE).
+            </p>
+            <Button
+              onClick={authenticateUser}
+              isLoading={isLoading}
+              disabled={!isMspConnected}
+              size="sm"
+              className="w-full"
+            >
+              Authenticate (SIWE)
+            </Button>
+          </>
         )}
       </div>
 
@@ -219,7 +232,7 @@ export function WalletDropdown({ mobile = false }: WalletDropdownProps) {
           onClick={() => setIsOpen(!isOpen)}
           className="flex items-center space-x-2 w-full"
         >
-          <span className="w-2 h-2 rounded-full bg-green-400" />
+          <span className={`w-2 h-2 rounded-full ${isFullyConnected ? 'bg-green-400' : 'bg-yellow-400'}`} />
           <span className="text-sm text-dh-200 font-mono">{truncateAddress(address!)}</span>
           <svg
             className={`w-4 h-4 text-dh-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
@@ -242,7 +255,7 @@ export function WalletDropdown({ mobile = false }: WalletDropdownProps) {
         onClick={() => setIsOpen(!isOpen)}
         className="flex items-center space-x-2 px-3 py-1.5 rounded-lg hover:bg-dh-700 transition-colors"
       >
-        <span className="w-2 h-2 rounded-full bg-green-400" />
+        <span className={`w-2 h-2 rounded-full ${isFullyConnected ? 'bg-green-400' : 'bg-yellow-400'}`} />
         <span className="text-sm text-dh-200 font-mono">{truncateAddress(address!)}</span>
         <svg
           className={`w-4 h-4 text-dh-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}

@@ -1,70 +1,126 @@
 export interface CodeSnippet {
   id: string;
   title: string;
+  tooltip?: string;
   code: string;
 }
 
-const connectFlowSnippet: CodeSnippet = {
-  id: 'connectFlow',
-  title: 'Connect & Authenticate',
-  code: `// src/context/AppContext.tsx
+export const dashboardSnippets: CodeSnippet[] = [
+  {
+    id: 'connectWallet',
+    title: 'Connect Wallet',
+    tooltip: 'Step 1: Connect your wallet via MetaMask',
+    code: `// src/services/clientService.ts
 
-// One-click connect: wallet → MSP → SIWE auth
-const connectAndAuthenticate = async () => {
-  // 1. Init WASM (first time only)
-  await initWasm();
+export async function connectWallet(): Promise<\`0x\${string}\`> {
+  const provider = getEthereumProvider();
 
-  // 2. Connect wallet — MetaMask popup for account access
-  const addr = await connectWalletService();
-  await initPolkadotApi();
-
-  // 3. Connect to MSP — no user interaction needed
-  await connectToMsp();
-  const info = await getMspInfo();
-
-  // 4. Authenticate via SIWE — MetaMask popup for signature
-  const profile = await authUser();
-
-  // Each step's success is committed to state immediately,
-  // so partial failures preserve what already succeeded.
-};
-
-// --- Under the hood ---
-
-// src/services/clientService.ts
-async function connectWallet(): Promise<\`0x\${string}\`> {
+  // Opens the wallet popup (e.g., MetaMask) asking the user to connect
   const accounts = await provider.request({
-    method: 'eth_requestAccounts',  // wallet popup
+    method: 'eth_requestAccounts',
   });
+
+  // Ensure the wallet is on the DataHaven testnet
   await switchToCorrectNetwork(provider);
 
+  connectedAddress = accounts[0] as \`0x\${string}\`;
+
+  // Create a viem WalletClient for signing transactions
   walletClientInstance = createWalletClient({
-    chain, account: accounts[0],
+    chain,
+    account: connectedAddress,
     transport: custom(provider),
   });
 
+  // Initialize the StorageHub SDK for on-chain storage operations
   storageHubClientInstance = new StorageHubClient({
-    rpcUrl: NETWORK.rpcUrl, chain,
+    rpcUrl: NETWORK.rpcUrl,
+    chain,
     walletClient: walletClientInstance,
   });
-  return accounts[0];
-}
 
-// src/services/mspService.ts
-async function authenticateUser(): Promise<UserInfo> {
-  const siweSession = await client.auth.SIWE(
-    walletClient, domain, uri   // SIWE challenge → sign
-  );
-  sessionToken = siweSession.token;
-  return await client.auth.getProfile();
+  // Initialize the Polkadot API for substrate chain queries
+  await initPolkadotApi();
+
+  return connectedAddress;
 }`,
+  },
+  {
+    id: 'connectToMsp',
+    title: 'Connect to MSP',
+    tooltip: 'Step 2: Connect to the storage provider',
+    code: `// src/services/mspService.ts
+
+// Returns auth credentials for each request, or undefined if not logged in
+const sessionProvider = async () => {
+  const address = getConnectedAddress();
+  return sessionToken && address
+    ? { token: sessionToken, user: { address } }
+    : undefined;
 };
 
+export async function connectToMsp(): Promise<MspClient> {
+  // Return cached instance if already connected
+  if (mspClientInstance) {
+    return mspClientInstance;
+  }
+
+  const httpCfg: HttpClientConfig = {
+    baseUrl: NETWORK.mspUrl,
+  };
+
+  // Connect to MSP — sessionProvider attaches auth to each request
+  mspClientInstance = await MspClient.connect(
+    httpCfg,
+    sessionProvider
+  );
+
+  return mspClientInstance;
+}`,
+  },
+  {
+    id: 'authenticateUser',
+    title: 'Authenticate (SIWE)',
+    tooltip: 'Step 3: Sign in with Ethereum (SIWE)',
+    code: `// src/services/mspService.ts
+
+export async function authenticateUser(): Promise<UserInfo> {
+  const client = getMspClient();
+  const walletClient = getWalletClient();
+
+  // SIWE requires the current domain and URI for the signed message
+  const domain = window.location.hostname;
+  const uri = window.location.origin;
+
+  // Sign-In With Ethereum: MSP sends challenge → user signs → MSP verifies
+  const siweSession = await client.auth.SIWE(
+    walletClient,
+    domain,
+    uri
+  );
+
+  sessionToken = siweSession.token;
+
+  const profile = await client.auth.getProfile();
+  authenticatedUserProfile = profile;
+
+  // Persist to sessionStorage (survives refresh, cleared on tab close)
+  sessionStorage.setItem(SESSION_TOKEN_KEY, sessionToken);
+  sessionStorage.setItem(
+    USER_PROFILE_KEY,
+    JSON.stringify(profile)
+  );
+
+  return profile;
+}`,
+  },
+];
+
 export const mintSnippets: CodeSnippet[] = [
-  connectFlowSnippet,
   {
     id: 'ensureBucket',
     title: 'Ensure Bucket',
+    tooltip: 'Creates your NFT storage bucket if it doesn\'t exist',
     code: `// src/operations/storageOperations.ts
 
 // Each user gets their own bucket for NFT assets
@@ -108,6 +164,7 @@ export async function ensureNftBucket(
   {
     id: 'uploadImage',
     title: 'Upload Image',
+    tooltip: 'Uploads the image file to DataHaven storage',
     code: `// src/operations/storageOperations.ts
 
 export async function uploadFileToDH(
@@ -150,6 +207,7 @@ export async function uploadFileToDH(
   {
     id: 'uploadMetadata',
     title: 'Upload Metadata',
+    tooltip: 'Uploads ERC-721 metadata JSON to DataHaven',
     code: `// src/pages/MintNFT.tsx
 
 // ERC-721 metadata JSON stored on DataHaven
@@ -177,6 +235,7 @@ await waitForMSPConfirmOnChain(metadataFileKey);`,
   {
     id: 'mintNft',
     title: 'Mint NFT',
+    tooltip: 'Calls the mint function on the NFT smart contract',
     code: `// src/operations/nftOperations.ts
 
 export async function mintNFT(
@@ -217,10 +276,10 @@ export async function mintNFT(
 ];
 
 export const gallerySnippets: CodeSnippet[] = [
-  connectFlowSnippet,
   {
     id: 'fetchNfts',
     title: 'Fetch NFTs',
+    tooltip: 'Reads all NFTs from the contract and fetches their metadata',
     code: `// src/operations/nftOperations.ts
 
 export async function fetchAllNFTs(): Promise<MintedNFT[]> {
@@ -259,6 +318,7 @@ export async function fetchAllNFTs(): Promise<MintedNFT[]> {
   {
     id: 'deleteFiles',
     title: 'Delete Files',
+    tooltip: 'Requests deletion of NFT files from DataHaven',
     code: `// src/operations/storageOperations.ts
 
 // Request deletion of a single file from DataHaven
@@ -306,6 +366,7 @@ export async function deleteNftFiles(
   {
     id: 'updateNftFiles',
     title: 'Update NFT Files',
+    tooltip: 'Uploads new files and updates the on-chain token URI',
     code: `// src/pages/Gallery.tsx — handleUpdateSubmit()
 
 // 1. Ensure the user's NFT bucket exists
@@ -340,14 +401,11 @@ const metadataFileKey = await uploadFileToDH(
 await waitForMSPConfirmOnChain(metadataFileKey);
 
 // 6. Update token URI on-chain to point to new metadata
-await updateTokenURI(nft.tokenId, metadataFileKey);`,
-  },
-  {
-    id: 'updateUri',
-    title: 'Update Token URI',
-    code: `// src/operations/nftOperations.ts
+await updateTokenURI(nft.tokenId, metadataFileKey);
 
-// Owner can re-point to new metadata after re-uploading
+// --- updateTokenURI() under the hood ---
+
+// src/operations/nftOperations.ts
 export async function updateTokenURI(
   tokenId: number,
   newMetadataFileKey: string
@@ -377,6 +435,7 @@ export async function updateTokenURI(
   {
     id: 'burnNft',
     title: 'Burn NFT',
+    tooltip: 'Burns the NFT on-chain and deletes its DataHaven files',
     code: `// src/operations/nftOperations.ts
 
 // Burn NFT on-chain and delete its DataHaven files

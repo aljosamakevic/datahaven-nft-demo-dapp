@@ -12,6 +12,7 @@ export function Layout({ children }: LayoutProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const navItems = [
+    { path: '/', label: 'Dashboard' },
     { path: '/mint', label: 'Mint NFT' },
     { path: '/gallery', label: 'Gallery' },
   ];

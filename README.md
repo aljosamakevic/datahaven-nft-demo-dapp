@@ -2,6 +2,8 @@
 
 A demo dApp for minting NFTs whose metadata and images are stored on the DataHaven network via the StorageHub SDK. The NFT smart contract is deployed on the DataHaven Testnet. This implementation showcases the full lifecycle of "mortal NFTs" — NFTs that are alive as long as the owner pays for file storage on DataHaven.
 
+A build of this demo is currently available at: https://demonft.datahaven.xyz/
+
 ## Features
 
 - **One-click connection** -- connects wallet, MSP, and authenticates via SIWE in a single flow from the navbar (2 wallet signatures)

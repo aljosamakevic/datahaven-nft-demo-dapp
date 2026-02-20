@@ -9,6 +9,20 @@ import { NFT_CONTRACT_ADDRESS, NFT_CONTRACT_ABI } from '../config/nftContract';
 import { getDownloadUrl, deleteNftFiles } from './storageOperations';
 import type { NFTMetadata, MintedNFT } from '../types';
 
+// Fetch gas fee parameters with a buffer above the current block base fee
+async function getGasFees(): Promise<{
+  maxFeePerGas: bigint;
+  maxPriorityFeePerGas: bigint;
+}> {
+  const publicClient = getPublicClient();
+  const block = await publicClient.getBlock({ blockTag: 'latest' });
+  const baseFee = block.baseFeePerGas ?? 0n;
+  // 50% buffer over base fee + priority tip
+  const maxPriorityFeePerGas = baseFee / 5n > 0n ? baseFee / 5n : 1_000_000_000n;
+  const maxFeePerGas = baseFee * 3n / 2n + maxPriorityFeePerGas;
+  return { maxFeePerGas, maxPriorityFeePerGas };
+}
+
 // Mint an NFT with the given metadata URI (DataHaven file key)
 export async function mintNFT(metadataFileKey: string): Promise<{ tokenId: number; txHash: string }> {
   const walletClient = getWalletClient();
@@ -19,6 +33,8 @@ export async function mintNFT(metadataFileKey: string): Promise<{ tokenId: numbe
     throw new Error('Wallet not connected');
   }
 
+  const gasFees = await getGasFees();
+
   const txHash = await walletClient.writeContract({
     address: NFT_CONTRACT_ADDRESS,
     abi: NFT_CONTRACT_ABI,
@@ -26,6 +42,7 @@ export async function mintNFT(metadataFileKey: string): Promise<{ tokenId: numbe
     args: [metadataFileKey],
     chain,
     account: address as `0x${string}`,
+    ...gasFees,
   });
 
   const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
@@ -69,6 +86,8 @@ export async function updateTokenURI(tokenId: number, newMetadataFileKey: string
     throw new Error('Wallet not connected');
   }
 
+  const gasFees = await getGasFees();
+
   const txHash = await walletClient.writeContract({
     address: NFT_CONTRACT_ADDRESS,
     abi: NFT_CONTRACT_ABI,
@@ -76,6 +95,7 @@ export async function updateTokenURI(tokenId: number, newMetadataFileKey: string
     args: [BigInt(tokenId), newMetadataFileKey],
     chain,
     account: address as `0x${string}`,
+    ...gasFees,
   });
 
   const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
@@ -102,6 +122,8 @@ export async function burnNFT(
     throw new Error('Wallet not connected');
   }
 
+  const gasFees = await getGasFees();
+
   const txHash = await walletClient.writeContract({
     address: NFT_CONTRACT_ADDRESS,
     abi: NFT_CONTRACT_ABI,
@@ -109,6 +131,7 @@ export async function burnNFT(
     args: [BigInt(tokenId)],
     chain,
     account: address as `0x${string}`,
+    ...gasFees,
   });
 
   const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });

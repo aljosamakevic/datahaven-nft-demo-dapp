@@ -5,14 +5,14 @@ A demo dApp for minting NFTs whose metadata and images are stored on the DataHav
 ## Features
 
 - **One-click connection** -- connects wallet, MSP, and authenticates via SIWE in a single flow from the navbar (2 wallet signatures)
-- **NFT minting** -- upload an image to DataHaven, generate ERC-721 metadata, and mint an NFT on-chain in a guided wizard
-- **NFT gallery** -- browse all minted NFTs with images fetched from DataHaven, filter by ownership, expandable detail panels
+- **NFT minting** -- 4-step guided wizard: ensure storage bucket, upload image to DataHaven, build and upload ERC-721 metadata, mint NFT on-chain
+- **NFT gallery** -- browse your minted NFTs with images fetched from DataHaven, expandable detail panels with file statuses and metadata
 - **File status monitoring** -- real-time polling of on-chain file statuses (ready, in progress, expired, deletion in progress)
 - **Update NFT files** -- upload a new image and metadata, then update the on-chain token URI to point to the new files
 - **Delete NFT files** -- request on-chain file deletion from DataHaven while keeping the token on-chain
 - **Burn NFTs** -- destroy the on-chain token and automatically delete associated DataHaven files
 - **Mortal NFTs** -- NFTs that are "alive" when files are accessible and "dead" when storage expires or files are deleted
-- **Interactive code panel** -- split-view layout showing the relevant source code for each operation
+- **Interactive code panel** -- split-view layout showing the relevant source code for each operation, with tooltips on snippet tabs
 
 ## Smart Contract
 
@@ -74,7 +74,7 @@ pnpm lint
 
 ```
 src/
-  App.tsx                         # Router (/ redirects to /mint)
+  App.tsx                         # Router (Dashboard, Mint, Gallery)
   main.tsx                        # React entry point
   index.css                       # Tailwind imports, custom theme, grid styles
 
@@ -87,12 +87,12 @@ src/
     SplitLayout.tsx               # Two-column layout with code panel toggle
     CodePanel.tsx                 # Syntax-highlighted code snippet viewer
     CodeToggleButton.tsx          # Toggle for code panel visibility
-    ProgressStepper.tsx           # Step indicator for mint flow
     Icons.tsx                     # SVG icon components
 
   pages/
-    MintNFT.tsx                   # Mint flow: upload image/metadata, mint NFT
-    Gallery.tsx                   # NFT grid with expand, update, delete, burn
+    Dashboard.tsx                 # 3-step connection dashboard (home page)
+    MintNFT.tsx                   # 4-step wizard: bucket, image, metadata, mint
+    Gallery.tsx                   # Your NFTs: expand, update, delete, burn
 
   context/
     AppContext.tsx                 # Global state: wallet, MSP, auth, one-click connect
@@ -138,7 +138,7 @@ contracts/
 
 1. **Connect** -- click "Connect" in the navbar; the app connects your wallet, switches to DataHaven Testnet, establishes the MSP connection, and authenticates via SIWE in one flow
 2. **Mint NFT** -- select an image, enter a name and description, and mint; the dApp handles bucket creation, image upload, metadata upload, on-chain confirmation, and minting
-3. **Browse Gallery** -- view all minted NFTs with images loaded from DataHaven; expand any card to see file statuses, metadata JSON, and owner actions
+3. **Browse Gallery** -- view your minted NFTs with images loaded from DataHaven; expand any card to see file statuses, metadata JSON, and actions
 4. **Update NFT** -- upload a new image and metadata, then update the on-chain token URI
 5. **Delete files** -- remove files from DataHaven storage while keeping the token on-chain (NFT shows as "Dead")
 6. **Burn NFT** -- destroy the token on-chain and delete its DataHaven files
@@ -155,7 +155,7 @@ The app uses a one-click connection accessible from the navbar on any page:
 4. **Connect to MSP** -- establishes connection to the storage provider (no user interaction)
 5. **Authenticate (SIWE)** -- MetaMask popup to sign a SIWE message, receives a session token
 
-Each step commits its success to state immediately, so partial failures preserve progress. The wallet dropdown in the navbar shows connection status and provides health checks and disconnect.
+Each step commits its success to state immediately, so partial failures preserve progress. The Dashboard page at `/` presents this flow as three interactive cards. The wallet dropdown in the navbar also exposes the individual connection steps and provides health checks and disconnect.
 
 ### Storage Flow
 

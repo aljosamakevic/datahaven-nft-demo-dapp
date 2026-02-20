@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { WalletDropdown } from './WalletDropdown';
+import { GitHubIcon } from './Icons';
 
 interface LayoutProps {
   children: ReactNode;
@@ -44,6 +45,15 @@ export function Layout({ children }: LayoutProps) {
                 </Link>
               ))}
               <WalletDropdown />
+              <a
+                href="https://github.com/papermoonio/datahaven-nft-demo-dapp"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-2 rounded-md text-dh-300 hover:text-white hover:bg-dh-700 transition-colors"
+                aria-label="View source on GitHub"
+              >
+                <GitHubIcon />
+              </a>
             </div>
 
             {/* Mobile menu button */}
@@ -82,6 +92,15 @@ export function Layout({ children }: LayoutProps) {
                 </Link>
               ))}
               <WalletDropdown mobile />
+              <a
+                href="https://github.com/papermoonio/datahaven-nft-demo-dapp"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center space-x-2 px-3 py-2 rounded-md text-dh-200 hover:bg-dh-700 hover:text-white transition-colors"
+              >
+                <GitHubIcon className="w-4 h-4" />
+                <span className="text-sm font-medium">GitHub</span>
+              </a>
             </div>
           </div>
         )}
